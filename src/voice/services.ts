@@ -33,10 +33,21 @@ export const SERVICE_CATALOG: Readonly<Record<string, readonly string[]>> = {
   venmo: ["venmo"],
   cashapp: ["cash app", "cashapp"],
   zelle: ["zelle"],
-  x: ["twitter", "x.com", "x corp"],
+  x: ["x", "twitter", "x.com", "x corp"],
   polymarket: ["polymarket"],
   kalshi: ["kalshi"],
   coinbase: ["coinbase"],
+  chase: ["chase", "jpmorgan"],
+  bankofamerica: ["bank of america", "boa", "bofa"],
+  wellsfargo: ["wells fargo", "wellsfargo"],
+  citi: ["citi", "citibank"],
+  capitalone: ["capital one"],
+  usbank: ["us bank", "u.s. bank"],
+  pnc: ["pnc"],
+  usaa: ["usaa"],
+  truist: ["truist"],
+  bank: ["bank"],
+  medical: ["doctor", "dr", "appointment", "clinic", "hospital", "prescription", "pharmacy", "labcorp", "quest", "quest diagnostics"],
 };
 
 /**
@@ -45,7 +56,34 @@ export const SERVICE_CATALOG: Readonly<Record<string, readonly string[]>> = {
  * betting exchanges get the real mobile. The broker refuses to open a
  * pending verification for these, so their codes always raise an alert.
  */
-export const REAL_MOBILE_ONLY: ReadonlySet<string> = new Set(["x", "paypal", "venmo", "cashapp", "zelle", "polymarket", "kalshi", "coinbase"]);
+export const REAL_MOBILE_ONLY: ReadonlySet<string> = new Set([
+  "x",
+  "paypal",
+  "venmo",
+  "cashapp",
+  "zelle",
+  "polymarket",
+  "kalshi",
+  "coinbase",
+  "chase",
+  "bankofamerica",
+  "wellsfargo",
+  "citi",
+  "capitalone",
+  "usbank",
+  "pnc",
+  "usaa",
+  "truist",
+  "bank",
+]);
+
+/**
+ * Never verified through the Voice number at all (ADR 0023): nothing
+ * medical goes through Voice or AgentMail — residency, credentialing and
+ * NPI stay on real contacts. The broker refuses to open a pending
+ * verification for these, so their codes always raise an alert.
+ */
+export const NEVER_VERIFY: ReadonlySet<string> = new Set(["medical"]);
 
 export function normalizeService(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, " ");

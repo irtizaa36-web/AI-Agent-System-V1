@@ -32,6 +32,8 @@ const RULES: readonly Rule[] = [
         /\b(6|six)[- ]digit\b/,
         /\bgoogle voice code\b/,
         /\bverify (that )?(you|u)('re| are)? ?(real|legit|not a (bot|scam(mer)?))\b/,
+        // Code relay that avoids the words code/PIN/digits: "read back the number Google texts you".
+        /\b(read|tell|give|share|forward|send)\b[^.?!]{0,30}\bthe (verification |confirmation )?(number|numbers)\b[^.?!]{0,40}\b(texts?|texted|sends?|sent)\b[^.?!]{0,10}\byou\b/,
       ]),
   },
   {

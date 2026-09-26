@@ -9,6 +9,7 @@ import { composeReply, sha256 } from "./drafter";
 import { readIntents } from "./intent";
 import { redactCodes, SecretCode } from "./redact";
 import { classifyScam } from "./scam";
+import { servicesNamed } from "./services";
 import { InMemoryVoiceStateStore, JsonFileVoiceStateStore } from "./store";
 import { FakeVoiceReplyTransport, OutboxVoiceReplyTransport, type VoiceReplyTransport } from "./transport";
 import type { Listing, VoiceEmailInput, VoiceInbound } from "./types";
@@ -18,7 +19,8 @@ import { parseVoiceEmail, toVoiceEmailInput } from "./voice-email";
 // Every number and address here is fictional (555-01xx is reserved for fiction).
 const BUYER_REPLY = "15550100001.15550100002.aBcD1234@txt.voice.google.com";
 const T0 = new Date("2026-09-26T15:00:00Z");
-const FOOTER = "\n\nTo respond to this text message, reply to this email or visit Google Voice.\nYOUR ACCOUNT HELP CENTER HELP FORUM\nGoogle LLC 1600 Amphitheatre Pkwy";
+const HEADER = "<https://voice.google.com>";
+const FOOTER = "\n\nTo respond to this message, launch Google Voice (https://voice.google.com) on your mobile device or computer.\nYOUR ACCOUNT HELP CENTER HELP FORUM\nGoogle LLC 1600 Amphitheatre Pkwy";
 
 let seq = 0;
 function textEmail(body: string, overrides: Partial<VoiceEmailInput> = {}): VoiceEmailInput {
@@ -28,7 +30,7 @@ function textEmail(body: string, overrides: Partial<VoiceEmailInput> = {}): Voic
     threadId: overrides.threadId ?? `thread-${seq}`,
     from: `"(555) 010-0001" <${BUYER_REPLY}>`,
     subject: "New text message from (555) 010-0001",
-    body: body + FOOTER,
+    body: HEADER + "\n" + body + FOOTER,
     receivedAt: T0.toISOString(),
     ...overrides,
   };
@@ -108,7 +110,7 @@ test("parse: anything not from Google Voice, or with an unknown subject, is igno
 test("parse: the handed-over JSON is validated field by field", () => {
   assert.throws(() => toVoiceEmailInput({ id: "x" }), /message\.threadId/);
   assert.throws(() => toVoiceEmailInput({ ...textEmail("hi"), receivedAt: "yesterday" }), /receivedAt/);
-  assert.equal(toVoiceEmailInput(textEmail("hi")).body.startsWith("hi"), true);
+  assert.equal(toVoiceEmailInput(textEmail("hi")).body.includes("\nhi\n"), true);
 });
 
 // ── redaction and SecretCode ─────────────────────────────────────────────
@@ -471,4 +473,61 @@ test("file store: state round-trips, contains no code value, and a corrupt file 
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+// ── real-email regressions (gaps found by the 2026-09-26 self-test) ───────
+// Fictional codes only; nothing here touches the network or a real account.
+
+test("parse: Google's own header and footer are chrome, never message text", () => {
+  const m = parseVoiceEmail(textEmail("Your Retell AI verification code is: 482916"));
+  assert.ok(m);
+  assert.equal(m.text, "Your Retell AI verification code is: 482916");
+  assert.ok(!servicesNamed(m.text).has("google"), "Google's chrome must not count as naming Google");
+});
+
+test("broker: an open Google verification does not take a Retell code", async () => {
+  const h = harness();
+  await h.voice.broker.start("google", { purpose: "p" });
+  const outcome = await h.voice.broker.ingest(inbound("Your Retell AI verification code is: 482916"));
+  // The message names no service the broker knows, so it alerts instead of
+  // being consumed by the open Google verification.
+  assert.equal(outcome.kind === "alert" && outcome.alert.reason, "service-not-named");
+  const open = (await h.voice.broker.list()).filter((p) => p.status === "open");
+  assert.equal(open.length, 1, "the Google verification stays open");
+});
+
+test("broker: a Retell code matches an open Retell verification", async () => {
+  const h = harness();
+  await h.voice.broker.start("retell ai", { purpose: "voice agent signup", aliases: ["retell"] });
+  const outcome = await h.voice.broker.ingest(inbound("Your Retell AI verification code is: 482916"));
+  assert.equal(outcome.kind === "consumed" && outcome.code.reveal(), "482916");
+});
+
+test("services: X, banks and medical terms are named", () => {
+  assert.ok(servicesNamed("X: your code is 482916").has("x"));
+  assert.ok(servicesNamed("Chase: your verification code is 482916").has("chase"));
+  assert.ok(servicesNamed("Dr. Smith: your code is 482916").has("medical"));
+  assert.ok(servicesNamed("Your appointment is confirmed for Tuesday").has("medical"));
+});
+
+test("broker: banks are real-mobile-only, medical is never verified", async () => {
+  const h = harness();
+  await assert.rejects(h.voice.broker.start("chase", { purpose: "p" }), /real mobile/);
+  await assert.rejects(h.voice.broker.start("medical", { purpose: "p" }), /never verified/);
+  assert.equal((await h.voice.broker.list()).length, 0);
+});
+
+test("scam: a code relay that avoids the words code/PIN/digits is flagged", () => {
+  assert.ok(classifyScam("read back the number Google texts you", COUCH).includes("verification-code-request"));
+  assert.deepEqual(
+    classifyScam("give me your number, I'll text you about the couch", COUCH).filter((f) => f === "verification-code-request"),
+    [],
+  );
+});
+
+test("intent: 'what time works Saturday?' is a pickup question", () => {
+  const r = readIntents("what time works Saturday?");
+  assert.ok(r.routine.includes("pickup"));
+  assert.deepEqual(r.needsToozy, []);
+  assert.ok(readIntents("does it still work?").needsToozy.includes("question about the item itself"));
 });

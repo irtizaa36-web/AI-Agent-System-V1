@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { redactCodes, SecretCode } from "./redact";
-import { defaultAliases, normalizeService, REAL_MOBILE_ONLY, servicesNamed } from "./services";
+import { defaultAliases, normalizeService, NEVER_VERIFY, REAL_MOBILE_ONLY, servicesNamed } from "./services";
 import type { VoiceStateStore } from "./store";
 import type { AlertReason, PendingVerification, SecurityAlert, VoiceInbound } from "./types";
 
@@ -81,6 +81,8 @@ export class VerificationBroker {
     if (!this.options.enabled) throw new VerificationError("The verification-code broker is off (VOICE_CODE_BROKER_ENABLED is not \"true\").");
     const key = normalizeService(service);
     if (key.length === 0) throw new VerificationError("service is required");
+    if (NEVER_VERIFY.has(key))
+      throw new VerificationError(`${key} is never verified through the Voice number (ADR 0023). No pending verification was opened.`);
     if (REAL_MOBILE_ONLY.has(key))
       throw new VerificationError(`${key} is verified with the real mobile, never the Voice number (ADR 0023). No pending verification was opened.`);
     if (input.purpose.trim().length === 0) throw new VerificationError("purpose is required: say which of Toozy's requests this verification is for");
