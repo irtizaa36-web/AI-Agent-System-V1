@@ -60,7 +60,7 @@ function runClaudeCli(cliPath: string, input: string): Promise<string> {
     const child = execFile(
       cliPath,
       ["-p", "--output-format", "text"],
-      { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 },
+      { timeout: 180_000, maxBuffer: 16 * 1024 * 1024, env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== "ANTHROPIC_API_KEY")) },
       (error, stdout, stderr) => {
         if (error) {
           const detail = typeof stderr === "string" ? stderr : String(stderr ?? "");

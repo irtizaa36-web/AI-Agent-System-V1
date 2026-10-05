@@ -30,6 +30,30 @@ test("ClaudeCliScoringClient pipes system+user through the CLI and returns stdou
   });
 });
 
+test("ClaudeCliScoringClient strips ANTHROPIC_API_KEY from the CLI's env and passes everything else through", async () => {
+  // A fake `claude` that reports what it was spawned with. If the key leaked
+  // through, the real CLI would use the retired API credit instead of the
+  // claude.ai login.
+  const dir = mkdtempSync(join(tmpdir(), "fake-claude-env-"));
+  const bin = join(dir, "claude");
+  writeFileSync(bin, '#!/bin/bash\ncat >/dev/null\necho "KEY=${ANTHROPIC_API_KEY-UNSET} OTHER=${SCORING_CLIENT_TEST_PASSTHROUGH-UNSET}"\n');
+  chmodSync(bin, 0o755);
+
+  const savedKey = process.env["ANTHROPIC_API_KEY"];
+  const savedOther = process.env["SCORING_CLIENT_TEST_PASSTHROUGH"];
+  process.env["ANTHROPIC_API_KEY"] = "test-key-must-not-reach-the-cli";
+  process.env["SCORING_CLIENT_TEST_PASSTHROUGH"] = "kept";
+  try {
+    const result = await new ClaudeCliScoringClient(bin).complete({ model: "m", system: "s", user: "u", maxTokens: 1 });
+    assert.equal(result.text.trim(), "KEY=UNSET OTHER=kept");
+  } finally {
+    if (savedKey === undefined) delete process.env["ANTHROPIC_API_KEY"];
+    else process.env["ANTHROPIC_API_KEY"] = savedKey;
+    if (savedOther === undefined) delete process.env["SCORING_CLIENT_TEST_PASSTHROUGH"];
+    else process.env["SCORING_CLIENT_TEST_PASSTHROUGH"] = savedOther;
+  }
+});
+
 test("createScoringClientFromEnv honors CLAUDE_CLI_PATH", () => {
   const saved = process.env["CLAUDE_CLI_PATH"];
   process.env["CLAUDE_CLI_PATH"] = fakeClaudeBin();
