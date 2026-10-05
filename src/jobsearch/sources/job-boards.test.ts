@@ -13,9 +13,10 @@ import { createPublicBoardSources } from "./public-boards";
 import { LINKEDIN_GUEST_SOURCE_ID } from "./linkedin-guest";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const NOW = new Date("2026-09-29T12:00:00Z").getTime();
+// Anchored to the real clock: the parsers filter recency against Date.now(), so a hardcoded date goes stale.
+const NOW = Date.now();
 const isoDaysAgo = (days: number): string => new Date(NOW - days * DAY_MS).toISOString();
-const FETCHED_AT = "2026-09-29T12:00:00.000Z";
+const FETCHED_AT = new Date(NOW).toISOString();
 
 describe("titleMatchesMarketingTerms", () => {
   it("matches marketing titles case-insensitively", () => {

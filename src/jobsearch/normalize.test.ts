@@ -160,6 +160,22 @@ test("parseExperienceYears reads a bare figure as a floor, not an exact match", 
   assert.deepEqual(parseExperienceYears("5 years of experience in program management"), { min: 5, max: null });
 });
 
+test("parseExperienceYears reads the yrs abbreviation", () => {
+  assert.deepEqual(parseExperienceYears("2-5 yrs technical content"), { min: 2, max: 5 });
+  assert.deepEqual(parseExperienceYears("3+ yrs of experience in growth marketing"), { min: 3, max: null });
+});
+
+test("parseExperienceYears reads a bare figure with qualifier words before experience", () => {
+  assert.deepEqual(parseExperienceYears("Requires 10 years of marketing experience"), { min: 10, max: null });
+});
+
+test("parseExperienceYears unions every stated figure instead of first-match-wins", () => {
+  assert.deepEqual(
+    parseExperienceYears("1-2 years in a startup environment. 5-7 years of marketing experience required."),
+    { min: 1, max: 7 }
+  );
+});
+
 test("parseExperienceYears returns nulls when nothing is stated, never a guess", () => {
   assert.deepEqual(parseExperienceYears("Own the roadmap and drive cross-functional execution."), {
     min: null,
