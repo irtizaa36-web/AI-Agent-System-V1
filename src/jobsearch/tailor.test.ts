@@ -338,7 +338,7 @@ test("jobs tailor refuses without an API key rather than drafting against nothin
         depsOf(collected, root),
       );
       assert.equal(exit, 1);
-      assert.ok(collected.err.join(" ").includes("ANTHROPIC_API_KEY"), "names the missing key");
+      assert.ok(collected.err.join(" ").includes("Claude Code CLI"), "names the missing CLI");
     } finally {
       if (saved !== undefined) process.env["ANTHROPIC_API_KEY"] = saved;
     }
