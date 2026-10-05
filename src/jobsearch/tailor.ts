@@ -14,7 +14,7 @@ import { costOf } from "./cost";
  * was a slot for a tailored resume and no way to produce one.
  *
  * The port is the same `ScoringClient` the scoring path uses (same client
- * setup, same ANTHROPIC_API_KEY, same error handling in scoring-client.ts) —
+ * setup, same Claude Code CLI, same error handling in scoring-client.ts) —
  * no new client class, because drafting needs nothing scoring's port doesn't
  * already provide. Round 1 is always the cheapest capable model; round 2
  * defaults there too, per the standing policy for drafting work.

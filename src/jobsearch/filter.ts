@@ -101,13 +101,12 @@ function checkRemoteRegion(record: JobRecord, prefs: Preferences): FilterOutcome
 }
 
 /**
- * Rejects a posting only when its stated experience-years requirement
- * cannot possibly overlap her target band — e.g. a floor/ceiling both
- * configured as [3, 6] rejects a posting that says "8+ years" (min 8 is
- * past the ceiling) and one that says "0-1 years" (max 1 is short of the
- * floor). A posting whose stated range still overlaps the band at all
- * (e.g. "3-8 years" against a [3,6] band) survives — this is an overlap
- * check, not an exact match. A posting that states no years requirement is
+ * Rejects a posting when its stated experience-years requirement falls outside
+ * her target band — hard boundaries (2026-10-04, Toozy's call: band is 3-7,
+ * was 3-6). A posting dies when any stated figure exceeds the ceiling
+ * ("5-8", "6-8", "3-8" all die; open-ended "7+" dies because its floor sits
+ * at the ceiling) or when its stated max sits below the floor ("0-1 years").
+ * "5-7" and "3-7" survive. A posting that states no years requirement is
  * NEVER rejected: same "don't guess" rule as the salary floor.
  */
 function checkExperience(record: JobRecord, prefs: Preferences): FilterOutcome {
@@ -124,10 +123,19 @@ function checkExperience(record: JobRecord, prefs: Preferences): FilterOutcome {
   if (record.experienceYearsMin === null && record.experienceYearsMax === null) return PASSED;
 
   if (prefs.experienceYearsCeiling !== null && record.experienceYearsMin !== null) {
-    if (record.experienceYearsMin > prefs.experienceYearsCeiling) {
+    if (record.experienceYearsMin >= prefs.experienceYearsCeiling) {
       return {
         passed: false,
         reason: `Wants ${record.experienceYearsMin}+ years, above the ${prefs.experienceYearsCeiling}-year ceiling`,
+      };
+    }
+  }
+
+  if (prefs.experienceYearsCeiling !== null && record.experienceYearsMax !== null) {
+    if (record.experienceYearsMax > prefs.experienceYearsCeiling) {
+      return {
+        passed: false,
+        reason: `Wants up to ${record.experienceYearsMax} years, above the ${prefs.experienceYearsCeiling}-year ceiling`,
       };
     }
   }

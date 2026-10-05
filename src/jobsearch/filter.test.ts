@@ -180,14 +180,16 @@ test('the level cap catches "Vice President" spelled out, via the "president" en
 });
 
 // Experience-years band, per Shivani's feedback: her resume shows 5 years,
-// and she wants roles asking for 3-6 years — not a step up in seniority
-// requirement, and not a step down into entry-level.
-const experiencePrefs: Preferences = { ...prefs, experienceYearsFloor: 3, experienceYearsCeiling: 6 };
+// and she wants roles asking for 3-7 years (widened from 3-6 on Toozy's
+// 2026-10-04 call) — not a step up in seniority requirement, and not a step
+// down into entry-level. Hard boundaries: any stated figure past the
+// ceiling kills the posting.
+const experiencePrefs: Preferences = { ...prefs, experienceYearsFloor: 3, experienceYearsCeiling: 7 };
 
 test("a posting wanting more experience than the ceiling is rejected", () => {
   const outcome = applyFilters(job({ experienceYearsMin: 8, experienceYearsMax: null }), experiencePrefs);
   assert.equal(outcome.passed, false);
-  assert.match(outcome.reason ?? "", /8\+ years.*above the 6-year ceiling/);
+  assert.match(outcome.reason ?? "", /8\+ years.*above the 7-year ceiling/);
 });
 
 test("a posting wanting less experience than the floor is rejected", () => {
@@ -196,10 +198,28 @@ test("a posting wanting less experience than the floor is rejected", () => {
   assert.match(outcome.reason ?? "", /at most 1 years.*below the 3-year floor/);
 });
 
-test("a posting whose range overlaps her band at all survives — this is an overlap check, not an exact match", () => {
-  // "3-8 years" overlaps [3,6] even though 8 is above her ceiling — someone
-  // wanting a floor of 3 would still consider a 5-year candidate.
-  assert.equal(applyFilters(job({ experienceYearsMin: 3, experienceYearsMax: 8 }), experiencePrefs).passed, true);
+test("a posting whose stated range touches 7 survives — '5-7' and '3-7' are in-band", () => {
+  assert.equal(applyFilters(job({ experienceYearsMin: 5, experienceYearsMax: 7 }), experiencePrefs).passed, true);
+  assert.equal(applyFilters(job({ experienceYearsMin: 3, experienceYearsMax: 7 }), experiencePrefs).passed, true);
+});
+
+test("a posting whose stated max exceeds the ceiling is rejected — no more overlap admissions", () => {
+  // "3-8 years" used to survive on overlap; under the locked 3-7 band it dies.
+  const outcome = applyFilters(job({ experienceYearsMin: 3, experienceYearsMax: 8 }), experiencePrefs);
+  assert.equal(outcome.passed, false);
+  assert.match(outcome.reason ?? "", /up to 8 years.*above the 7-year ceiling/);
+  assert.equal(applyFilters(job({ experienceYearsMin: 6, experienceYearsMax: 8 }), experiencePrefs).passed, false);
+  assert.equal(applyFilters(job({ experienceYearsMin: 5, experienceYearsMax: 8 }), experiencePrefs).passed, false);
+});
+
+test("an open-ended '7+' posting is rejected — its floor sits at the ceiling", () => {
+  const outcome = applyFilters(job({ experienceYearsMin: 7, experienceYearsMax: null }), experiencePrefs);
+  assert.equal(outcome.passed, false);
+  assert.match(outcome.reason ?? "", /7\+ years.*above the 7-year ceiling/);
+});
+
+test("an open-ended '5+' posting survives — an unstated max is not evidence of a mismatch", () => {
+  assert.equal(applyFilters(job({ experienceYearsMin: 5, experienceYearsMax: null }), experiencePrefs).passed, true);
 });
 
 test("a posting stating no years requirement at all is never rejected — same rule as the salary floor", () => {
