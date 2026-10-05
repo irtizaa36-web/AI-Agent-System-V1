@@ -18,6 +18,7 @@
     "pipeline": "npm run build --silent && node --env-file-if-exists=.env dist/cli/index.js jobs run",
     "jobs": "npm run build --silent && node --env-file-if-exists=.env dist/cli/index.js jobs",
     "tailor": "npm run build --silent && node --env-file-if-exists=.env dist/cli/index.js jobs tailor",
+    "calls": "npm run build --silent && node --env-file-if-exists=.env dist/cli/index.js calls",
     "watch-briefs": "npm run build --silent && node --env-file-if-exists=.env dist/cli/index.js watch-briefs"
   },
   "dependencies": {

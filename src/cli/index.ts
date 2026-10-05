@@ -37,6 +37,7 @@ import { runWatchBriefsCommand } from "./watch-briefs-commands";
 import { createSettlementsDeps, type SettlementsDeps } from "../settlements/deps";
 import { JsonFileTrackerStorage } from "../settlements/storage";
 import { runVoiceCommand } from "./voice-commands";
+import { runCallsCommand } from "./calls-commands";
 import { createDefaultVoiceDeps, type VoiceDeps } from "../voice/deps";
 import type { Registry } from "../registry/registry";
 import type { RunStore } from "../store/run-store";
@@ -110,6 +111,7 @@ function printUsage(stdout: (line: string) => void): void {
       "  orchestrator settlements deadlines|alerts|review|research   Settlement claims: deadlines, nudges, eligibility, new-settlement research",
       "  orchestrator settlements add|status|verdict|action|...      Record what you did; you file every claim yourself (settlements help)",
       "  orchestrator voice status|ingest|alerts|drafts|approve|send  Google Voice: matched verification codes, gated SMS replies (voice help)",
+      "  orchestrator calls doctor|record|transcribe|list            Record iPhone calls on this Mac, transcribe locally (calls help)",
       "  orchestrator marketplace selling|buying|channels ...       FB Marketplace selling agent: queues, hunts, outbox (marketplace selling help)",
       "  orchestrator x search-sweep                                 Standing X search-intel sweep, with session health-check and fallback (ADR 0025)",
       "  orchestrator watch-briefs poll                              One poll for new orchestrator briefs on claude/* branches (ADR 0027)",
@@ -369,6 +371,10 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
 
   if (command === "voice") {
     return runVoiceCommand(rest, deps);
+  }
+
+  if (command === "calls") {
+    return runCallsCommand(rest, deps);
   }
 
   if (command === "marketplace") {

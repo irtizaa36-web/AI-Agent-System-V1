@@ -124,6 +124,10 @@ Then load it once with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/
 
 Once it's running, `http://localhost:4317` can be pinned as its own Dock window (Safari's "Add to Dock," or the equivalent in another browser) instead of living in a regular browser tab - a real standalone window for handing the coworker system a task, distinct from Claude Desktop's own separate "Cowork" tab.
 
+## Call recording and transcription
+
+Setup and per-call steps: `docs/operations/call-transcription.md` (ADR 0030). Runs only on the Mac that relays iPhone calls. Recordings and transcripts live in `.orchestrator/calls/` and are never committed.
+
 ## Local-only dependencies
 
 These resources must never be committed or copied into a handoff:
