@@ -2,6 +2,7 @@ import type { Listing, TrackerDocument } from "../types";
 import { DEFAULT_CONFIG, type StaleDropConfig } from "../config";
 import { ACTIONS, canAutonomous, sellingScope } from "../policy";
 import { logParseFailure, parseJsonLenient } from "../parse";
+import { isLiveListingStatus } from "./ladder";
 
 /**
  * SELLING — self-healing listings (ADR 0024).
@@ -30,7 +31,7 @@ export function detectStaleListings(doc: TrackerDocument, nowIso: string, staleA
   const now = new Date(nowIso).getTime();
   const out: HealingSuggestion[] = [];
   for (const listing of doc.listings) {
-    if (listing.status !== "active" || !listing.monitoring) continue;
+    if (!isLiveListingStatus(listing.status) || !listing.monitoring) continue;
     const leads = doc.leads.filter((l) => l.listingId === listing.id);
     const latest = leads.reduce((max, l) => Math.max(max, new Date(l.lastContactAt).getTime()), new Date(listing.createdAt).getTime());
     const daysQuiet = (now - latest) / (24 * 3600_000);
@@ -89,7 +90,7 @@ export async function retireMissingListings(
   const live = new Set(ids);
   const retired: Listing[] = [];
   const listings = doc.listings.map((l) => {
-    if (l.status === "active" && l.fbListingId && !live.has(l.fbListingId)) {
+    if (isLiveListingStatus(l.status) && l.fbListingId && !live.has(l.fbListingId)) {
       retired.push(l);
       return { ...l, status: "sold" as const, monitoring: false, updatedAt: nowIso };
     }
