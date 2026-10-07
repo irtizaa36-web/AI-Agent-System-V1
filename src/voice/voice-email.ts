@@ -25,6 +25,20 @@ const FOOTER_MARKERS = [
   /^you are receiving this email because/i,
 ];
 
+/**
+ * Google's own chrome at the top of the body ("<https://voice.google.com>").
+ * It is not part of the message, and leaving it in makes every real email
+ * read as naming the "google" service, which poisons code matching.
+ */
+const CHROME_HEADER_LINE = /^<https?:\/\/[^\s<>]+>\s*$/i;
+
+function stripChromeHeader(body: string): string {
+  const lines = body.replace(/\r\n/g, "\n").split("\n");
+  let start = 0;
+  while (start < lines.length && (lines[start].trim() === "" || CHROME_HEADER_LINE.test(lines[start].trim()))) start += 1;
+  return lines.slice(start).join("\n");
+}
+
 function senderAddress(from: string): string {
   const angle = from.match(/<([^>]+)>/);
   return (angle ? angle[1] : from).trim();
