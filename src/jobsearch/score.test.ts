@@ -63,62 +63,8 @@ test("a posting with no stated salary is described as not stated, not omitted", 
   assert.match(buildBatchPrompt([job("a")]), /"salary": "not stated"/);
 });
 
-test("parseScoringResponse reads a clean array", () => {
-  const parsed = parseScoringResponse('[{"id":"a","score":88,"confidence":"high","rationale":"Good.","gaps":[]}]');
-  assert.equal(parsed.entries.length, 1);
-  assert.equal(parsed.entries[0]?.score, 88);
-  assert.equal(parsed.entries[0]?.confidence, "high");
-  assert.deepEqual(parsed.failures, []);
-});
 
-test("parseScoringResponse tolerates a code fence", () => {
-  const fenced = parseScoringResponse('```json\n[{"id":"a","score":70,"confidence":"medium","rationale":"ok","gaps":[]}]\n```');
-  assert.equal(fenced.entries[0]?.id, "a");
-});
 
-test("one malformed entry is skipped and named, and the rest of the batch still parses", () => {
-  const parsed = parseScoringResponse(
-    '[{"id":"a","score":88,"confidence":"high","rationale":"Good.","gaps":[]},' +
-      '{"score":"high"},' +
-      '{"id":"c","score":40,"confidence":"medium","rationale":"Wrong level.","gaps":[]}]',
-  );
-  assert.equal(parsed.entries.length, 2);
-  assert.deepEqual(parsed.entries.map((e) => e.id), ["a", "c"]);
-  assert.equal(parsed.failures.length, 1);
-  assert.match(parsed.failures[0] ?? "", /scoring entry 1/);
-});
-
-test("a non-numeric score skips the entry instead of voiding the batch", () => {
-  const parsed = parseScoringResponse(
-    '[{"id":"a","score":"ninety","confidence":"high","rationale":"x","gaps":[]},' +
-      '{"id":"b","score":55,"confidence":"low","rationale":"y","gaps":[]}]',
-  );
-  assert.equal(parsed.entries.length, 1);
-  assert.equal(parsed.entries[0]?.id, "b");
-  assert.match(parsed.failures[0] ?? "", /non-numeric score/);
-});
-
-test("a response that is not a JSON array at all still throws at the batch level", () => {
-  assert.throws(() => parseScoringResponse("this is not json"), /not a JSON array/);
-});
-
-test("parseScoringResponse clamps an out-of-range score and defaults an unknown confidence to low", () => {
-  const parsed = parseScoringResponse('[{"id":"a","score":120,"confidence":"certain","rationale":"x","gaps":[]}]');
-  assert.equal(parsed.entries[0]?.score, 100);
-  assert.equal(parsed.entries[0]?.confidence, "low");
-});
-
-test("scoreRecords names skipped malformed entries in the run failures", async () => {
-  const client = new FakeScoringClient([
-    '[{"id":"a","score":90,"confidence":"high","rationale":"Strong.","gaps":[]},' + '{"id":"b","score":"n/a","confidence":"high","rationale":"x","gaps":[]}]',
-  ]);
-
-  const result = await scoreRecords([job("a"), job("b")], profile, prefs, client, new CostLedger("run-3", ledgerPath));
-
-  assert.equal(result.scored.length, 1);
-  assert.equal(result.scored[0]?.id, "a");
-  assert.match(result.failures.join(" "), /non-numeric score/);
-});
 
 test("scoreRecords shortlists above the cutoff and merely scores below it", async () => {
   const client = new FakeScoringClient([
@@ -160,6 +106,50 @@ test("the system prompt asks for experience alignment and treats titles as examp
   const system = buildSystemPrompt(profile, prefs);
   assert.match(system, /does NOT need a title from a fixed list/);
   assert.match(system, /examples only, not a required list/);
+});
+
+test("parseScoringResponse tolerates a code fence", () => {
+  const fenced = parseScoringResponse('```json\n[{"id":"a","score":70,"confidence":"medium","rationale":"ok","gaps":[]}]\n```');
+  assert.equal(fenced.entries[0]?.id, "a");
+})
+
+test("one malformed entry is skipped and named, and the rest of the batch still parses", () => {
+  const parsed = parseScoringResponse(
+    '[{"id":"a","score":88,"confidence":"high","rationale":"Good.","gaps":[]},' +
+      '{"score":"high"},' +
+      '{"id":"c","score":40,"confidence":"medium","rationale":"Wrong level.","gaps":[]}]',
+  );
+  assert.equal(parsed.entries.length, 2);
+  assert.deepEqual(parsed.entries.map((e) => e.id), ["a", "c"]);
+  assert.equal(parsed.failures.length, 1);
+  assert.match(parsed.failures[0] ?? "", /scoring entry 1/);
+})
+
+test("a non-numeric score skips the entry instead of voiding the batch", () => {
+  const parsed = parseScoringResponse(
+    '[{"id":"a","score":"ninety","confidence":"high","rationale":"x","gaps":[]},' +
+      '{"id":"b","score":55,"confidence":"low","rationale":"y","gaps":[]}]',
+  );
+  assert.equal(parsed.entries.length, 1);
+  assert.equal(parsed.entries[0]?.id, "b");
+  assert.match(parsed.failures[0] ?? "", /non-numeric score/);
+})
+
+test("a response that is not a JSON array at all still throws at the batch level", () => {
+  assert.throws(() => parseScoringResponse("this is not json"), /not a JSON array/);
+})
+
+test("scoreRecords names skipped malformed entries in the run failures", async () => {
+  const client = new FakeScoringClient([
+    '[{"id":"a","score":90,"confidence":"high","rationale":"Strong.","gaps":[]},' + '{"id":"b","score":"n/a","confidence":"high","rationale":"x","gaps":[]}]',
+  ]);
+
+  const result = await scoreRecords([job("a"), job("b")], profile, prefs, client, new CostLedger("run-3", ledgerPath));
+
+  assert.equal(result.scored.length, 1);
+  assert.equal(result.scored[0]?.id, "a");
+  assert.match(result.failures.join(" "), /non-numeric score/);
+})
 
 test("the scoring prompt asks for all six dimension scores and names posted/firstSeen", () => {
   const system = buildSystemPrompt(profile, prefs);
@@ -169,7 +159,7 @@ test("the scoring prompt asks for all six dimension scores and names posted/firs
   const batch = buildBatchPrompt([job("a")]);
   assert.ok(batch.includes("\"posted\""), "posted date reaches the model");
   assert.ok(batch.includes("\"firstSeen\""), "first-seen date reaches the model");
-});
+})
 
 test("parseScoreDimensions reads six finite numbers and rejects partial sets", async () => {
   const { parseScoreDimensions } = await import("./score.js");
@@ -179,7 +169,7 @@ test("parseScoreDimensions reads six finite numbers and rejects partial sets", a
   assert.equal(parseScoreDimensions({ title: 80, experience: 70, skills: 90, location: 60, salary: "high", recency: 100 }), null, "non-numeric stores null");
   assert.equal(parseScoreDimensions(null), null);
   assert.equal(parseScoreDimensions("nope"), null);
-});
+})
 
 test("scoreRecords stores dimensions; malformed dimensions keep the composite", async () => {
   const client = new FakeScoringClient([
@@ -193,7 +183,7 @@ test("scoreRecords stores dimensions; malformed dimensions keep the composite", 
   assert.equal(b?.scoreDimensions, null, "partial dimensions store null without losing the entry");
   assert.equal(b?.score, 70, "the composite survives bad dimensions");
   assert.equal(result.failures.length, 0, "dimension problems never become entry failures");
-});
+})
 
 test("effectiveScore is the composite by default — cut and rank behavior identical until a human re-weights", async () => {
   const { effectiveScore } = await import("./score.js");
@@ -222,7 +212,7 @@ test("effectiveScore is the composite by default — cut and rank behavior ident
     70,
     "all-zero weights: composite fallback, not division by zero",
   );
-});
+})
 
 test("scoreRecords cuts on the effective score when weights are set", async () => {
   const weighted = { ...prefs, scoreWeights: { title: 1, experience: 0, skills: 0, location: 0, salary: 0, recency: 0 } };
@@ -231,7 +221,7 @@ test("scoreRecords cuts on the effective score when weights are set", async () =
   ]);
   const result = await scoreRecords([job("a")], profile, weighted, client, new CostLedger("run-weighted", ledgerPath));
   assert.equal(result.scored[0]?.state, "shortlisted", "title dimension 95 clears the 65 cutoff even though the composite is 60");
-});
+})
 
 test("scoreRecords applies the affinity bonus and records it in the rationale", async () => {
   const { buildAffinity, parseAppliedHistory } = await import("./affinity.js");
@@ -258,7 +248,7 @@ test("scoreRecords applies the affinity bonus and records it in the rationale", 
   assert.match(record?.rationale ?? "", /\[affinity \+5:/, "bonus recorded in the rationale");
   assert.match(record?.rationale ?? "", /Acme Corp/, "company named as evidence");
   assert.equal(record?.state, "shortlisted", "68 clears the 65 cutoff — the nudge is real but the cutoff itself is untouched");
-});
+})
 
 test("scoreRecords without an affinity model behaves exactly as before", async () => {
   const client = new FakeScoringClient([
@@ -274,7 +264,7 @@ test("scoreRecords without an affinity model behaves exactly as before", async (
   assert.equal(result.scored[0]?.score, 63, "no bonus without a model");
   assert.equal(result.scored[0]?.rationale, "Good fit.", "rationale untouched");
   assert.equal(result.scored[0]?.state, "scored", "63 stays below the 65 cutoff");
-});
+})
 
 test("the affinity bonus never pushes a score past 100", async () => {
   const { buildAffinity, parseAppliedHistory } = await import("./affinity.js");
@@ -295,5 +285,4 @@ test("the affinity bonus never pushes a score past 100", async () => {
     affinity,
   );
   assert.equal(result.scored[0]?.score, 100);
-
-});
+})

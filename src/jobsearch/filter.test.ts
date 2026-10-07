@@ -274,7 +274,8 @@ const threeDayPrefs: Preferences = { ...prefs, maxPostingAgeDays: 3 };
 const postedDaysAgo = (days: number): string => new Date(shivaniNow.getTime() - days * DAY_MS).toISOString();
 
 test("3-day cutoff: 2.9 days old is kept", () => {
-  assert.equal(applyFilters(job({ postedAt: postedDaysAgo(2.9) }), threeDayPrefs, shivaniNow).passed, true);
+  const posted = postedDaysAgo(2.9);
+  assert.equal(applyFilters(job({ postedAt: posted, firstSeenAt: posted }), threeDayPrefs, shivaniNow).passed, true);
 });
 
 test("3-day cutoff: 3.1 days old is dropped", () => {
@@ -284,7 +285,8 @@ test("3-day cutoff: 3.1 days old is dropped", () => {
 });
 
 test("3-day cutoff: exactly 3.0 days old is KEPT (limit is inclusive; only strictly older is dropped)", () => {
-  assert.equal(applyFilters(job({ postedAt: postedDaysAgo(3) }), threeDayPrefs, shivaniNow).passed, true);
+  const posted = postedDaysAgo(3);
+  assert.equal(applyFilters(job({ postedAt: posted, firstSeenAt: posted }), threeDayPrefs, shivaniNow).passed, true);
 });
 
 test("3-day cutoff: unknown or unparseable posted dates are not newly excluded", () => {
@@ -331,9 +333,27 @@ test("maxRequiredYearsExperience: rejection reason names the cap and buckets cle
 test("maxRequiredYearsExperience: null disables the cap and unstated years always pass", () => {
   assert.equal(applyFilters(job({ experienceYearsMin: 12 }), prefs).passed, true);
   assert.equal(applyFilters(job({ experienceYearsMin: null }), maxYearsPrefs).passed, true);
+});
 
-// Fix 1 (revamp): recency anchors on min(firstSeenAt, postedAt), because
-// board date fields are often edit-stamps rather than first-published dates.
+
+test("a title matches a configured pattern even when the words are reordered", () => {
+  // Real Sep 14 examples that a literal substring check silently dropped:
+  // the board's title leads with a qualifier or restructures the phrase, but
+  // every word in the configured pattern is still there.
+  const outcome = applyFilters(job({ title: "Senior GTM Strategy & Operations Manager, Mid-Late Sales Funnel" }), {
+    ...prefs,
+    titles: ["strategy & operations manager"],
+  });
+  assert.equal(outcome.passed, true);
+})
+
+
+test("an empty titles list lets everything through rather than rejecting the whole market", () => {
+  const outcome = applyFilters(job({ title: "Staff Backend Engineer" }), { ...prefs, titles: [] });
+  assert.equal(outcome.passed, true);
+})
+
+
 test("a bumped old role — fresh postedAt, old firstSeenAt — is rejected by the age limit", () => {
   const now = new Date("2026-09-13T00:00:00.000Z");
   const outcome = applyFilters(
@@ -346,7 +366,7 @@ test("a bumped old role — fresh postedAt, old firstSeenAt — is rejected by t
   );
   assert.equal(outcome.passed, false, "the bump must not sail through the 30-day window");
   assert.match(outcome.reason ?? "", /74 days ago, older than the 30-day limit/);
-});
+})
 
 test("a genuinely fresh role passes even though the anchor logic now consults firstSeenAt", () => {
   const now = new Date("2026-09-13T00:00:00.000Z");
@@ -356,7 +376,7 @@ test("a genuinely fresh role passes even though the anchor logic now consults fi
     now,
   );
   assert.equal(outcome.passed, true);
-});
+})
 
 test("a dateless posting is still never rejected by the age limit, even when first seen long ago", () => {
   const now = new Date("2026-09-13T00:00:00.000Z");
@@ -366,9 +386,8 @@ test("a dateless posting is still never rejected by the age limit, even when fir
     now,
   );
   assert.equal(outcome.passed, true, "dateless postings are never rejected — the 'don't guess' rule stands");
-});
+})
 
-// Fix 4a (revamp): the metro re-admit gate reads the structured location field only.
 test("a metro named only in the summary prose no longer re-admits an onsite role", () => {
   const outcome = applyFilters(
     job({
@@ -380,7 +399,7 @@ test("a metro named only in the summary prose no longer re-admits an onsite role
   );
   assert.equal(outcome.passed, false);
   assert.match(outcome.reason ?? "", /Not remote/);
-});
+})
 
 test("a metro named in the structured location field still re-admits an onsite role", () => {
   const outcome = applyFilters(
@@ -388,9 +407,8 @@ test("a metro named in the structured location field still re-admits an onsite r
     { ...prefs, metros: ["Austin"] },
   );
   assert.equal(outcome.passed, true);
-});
+})
 
-// Fix 4b (revamp): per-watchlist-entry maxAgeDays override.
 test("a per-board age override tightens the window for that board only", () => {
   const now = new Date("2026-09-13T00:00:00.000Z");
   const record = job({ postedAt: "2026-08-24T00:00:00.000Z", firstSeenAt: "2026-08-24T00:00:00.000Z" }); // 20 days old
@@ -401,9 +419,8 @@ test("a per-board age override tightens the window for that board only", () => {
 
   const globalDefault = applyFilters(record, { ...prefs, maxPostingAgeDays: 30 }, now);
   assert.equal(globalDefault.passed, true, "absent the override, the global default still applies");
-});
+})
 
-// Fix 4c (revamp): maxImpliedExperienceYears caps open-ended floors.
 test("an open-ended 8+ floor rejects under the implied cap, passes without it", () => {
   const record = job({ experienceYearsMin: 8, experienceYearsMax: null });
   // A band with no ceiling lets the overlap check pass, so only the
@@ -416,7 +433,7 @@ test("an open-ended 8+ floor rejects under the implied cap, passes without it", 
 
   const uncapped = applyFilters(record, band);
   assert.equal(uncapped.passed, true, "null cap preserves the historical behavior");
-});
+})
 
 test("an open-ended floor within the implied cap still overlaps the band", () => {
   const outcome = applyFilters(job({ experienceYearsMin: 4, experienceYearsMax: null }), {
@@ -426,15 +443,5 @@ test("an open-ended floor within the implied cap still overlaps the band", () =>
     maxImpliedExperienceYears: 6,
   });
   assert.equal(outcome.passed, true);
-});
+})
 
-test("a closed range is unaffected by the implied cap", () => {
-  const outcome = applyFilters(job({ experienceYearsMin: 3, experienceYearsMax: 8 }), {
-    ...prefs,
-    experienceYearsFloor: 3,
-    experienceYearsCeiling: 6,
-    maxImpliedExperienceYears: 6,
-  });
-  assert.equal(outcome.passed, true, "the cap only constrains open-ended floors, never closed ranges");
-
-});

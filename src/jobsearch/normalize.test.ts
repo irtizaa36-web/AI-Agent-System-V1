@@ -279,6 +279,7 @@ test("parseExperienceYears minimum across the phrasings the max-years filter rel
   assert.equal(parseExperienceYears("6-8 years experience").min, 6);
   assert.equal(parseExperienceYears("6 years of experience").min, 6);
   assert.equal(parseExperienceYears("No years stated here").min, null);
+});
 
 test("truncateToBudget keeps the tail as well as the head for over-budget text", () => {
   const head = "HEAD-SECTION\n".repeat(200);
@@ -289,10 +290,9 @@ test("truncateToBudget keeps the tail as well as the head for over-budget text",
   assert.match(out, /HEAD-SECTION/);
   assert.match(out, /REQUIREMENTS: 5 years of Python\./, "the tail signal survives the cut");
   assert.equal((out.match(/\[truncated\]/g) ?? []).length, 2, "both halves are marked");
-});
+})
 
 test("truncateToBudget on under-budget text returns it untouched and unmarked", () => {
   const text = "short text";
   assert.equal(truncateToBudget(text, 600), text);
-
-});
+})

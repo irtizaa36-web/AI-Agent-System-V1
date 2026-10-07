@@ -143,6 +143,7 @@ test("the digest omits applicant text when the count is missing", () => {
   const markdown = renderDigest(summary({ shortlisted: [job({ applicantCount: null }), job({ id: "job-2" })] }));
   assert.doesNotMatch(markdown, /applicant/);
   assert.equal(digestPayload(summary()).shortlisted[0]?.applicantCount, null);
+});
 
 test("the Also seen list caps at ten and names the remainder", () => {
   const many = Array.from({ length: 25 }, (_, i) => job({ id: `job-${i}`, title: `Role ${i}`, score: 40 }));
@@ -150,13 +151,13 @@ test("the Also seen list caps at ten and names the remainder", () => {
   const roleLines = markdown.split("\n").filter((l) => l.startsWith("- **"));
   assert.equal(roleLines.length, 10, "only ten roles are listed");
   assert.match(markdown, /- …and 15 more below the cutoff/);
-});
+})
 
 test("a short Also seen list is shown in full with no overflow line", () => {
   const few = Array.from({ length: 3 }, (_, i) => job({ id: `job-${i}`, title: `Role ${i}`, score: 40 }));
   const markdown = renderDigest(summary({ shortlisted: [], alsoSeen: few }));
   assert.doesNotMatch(markdown, /more below the cutoff/);
-});
+})
 
 test("writeRejectionsLog writes one JSON line per rejected record with its bucketed reason", async () => {
   const { mkdtemp, readFile } = await import("node:fs/promises");
@@ -178,10 +179,10 @@ test("writeRejectionsLog writes one JSON line per rejected record with its bucke
   assert.equal(first["id"], "r1");
   assert.equal(first["title"], "Janitor");
   assert.equal(first["company"], "Acme");
-  assert.equal(first["reason"], "Title outside the target cluster");
+  assert.equal(first["reason"], "Title outside the old target cluster (retired gate)");
   const second = JSON.parse(lines[1] as string) as Record<string, unknown>;
   assert.equal(second["reason"], "Posting older than the age limit", "reasons are bucketed, not raw strings");
-});
+})
 
 test("shortlisted roles show the per-dimension fit breakdown when dimensions were stored", () => {
   const markdown = renderDigest(
@@ -202,5 +203,4 @@ test("shortlisted roles show the per-dimension fit breakdown when dimensions wer
     1,
     "only the role with stored dimensions shows a breakdown",
   );
-
-});
+})

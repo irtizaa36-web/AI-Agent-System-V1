@@ -78,7 +78,7 @@ test("v3: seed keeps existing v2 seed data untouched", () => {
   assert.ok(doc.listings.some((l) => l.id === "chair" && l.price === 90));
   assert.ok(doc.listings.some((l) => l.id === "bissell"));
   assert.equal(doc.leads.length, 9);
-  assert.ok(doc.leads.some((l) => l.id === "ethan" && l.status === "confirmed"));
+  assert.ok(doc.leads.some((l) => l.id === "buyer-1" && l.status === "confirmed"));
   assert.ok(doc.campaigns.some((c) => c.name === "keyboard-mouse" && c.status === "cancelled"));
   assert.equal(doc.constraints.length, 1);
   assert.equal(doc.authority.length, 3);
@@ -167,7 +167,7 @@ test("v3: lead sendAuthority persists and defaults when absent", async () => {
   const auto = loaded.leads.find((l) => l.id === "fixture-auto")!;
   assert.equal(auto.sendAuthority, "auto");
   assert.equal(leadSendAuthority(auto), "auto");
-  const legacy = loaded.leads.find((l) => l.id === "kat")!;
+  const legacy = loaded.leads.find((l) => l.id === "buyer-2")!;
   assert.equal(legacy.sendAuthority, undefined);
   assert.equal(leadSendAuthority(legacy), "per_message");
 });

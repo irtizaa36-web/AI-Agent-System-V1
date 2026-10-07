@@ -66,6 +66,7 @@ export function applicantLine(record: JobRecord): string | null {
 function applicantSuffix(record: JobRecord): string {
   const line = applicantLine(record);
   return line ? ` · ${line}` : "";
+}
 
 /** Stage 12: the per-axis breakdown under a shortlisted role, when the scoring response carried one. */
 function dimensionsLine(record: JobRecord): string | null {

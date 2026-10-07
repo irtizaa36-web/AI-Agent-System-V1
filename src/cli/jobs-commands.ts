@@ -308,9 +308,7 @@ async function runJobsRun(profile: string, root: string, deps: JobsCommandDeps):
   const loadedPrefs = await loadPreferences(profile, root);
   const watchlist = await loadWatchlist(profile, root);
   const inkboxClient = createInkboxClientFromEnv();
-  const publicBoards = createPublicBoardSources(profile, prefs.titles, { onWarning: deps.stderr, root });
-
-// Muted companies are a separate explicit action from preference
+  // Muted companies are a separate explicit action from preference
   // exclusions, but they must behave the same downstream — so the mute
   // list merges into the run's exclusions here, at the one place filters
   // read them. Rejecting a posting never touches this list.
@@ -318,6 +316,7 @@ async function runJobsRun(profile: string, root: string, deps: JobsCommandDeps):
   const prefs = muted.length > 0
     ? { ...loadedPrefs, companyExclusions: [...loadedPrefs.companyExclusions, ...muted] }
     : loadedPrefs;
+  const publicBoards = createPublicBoardSources(profile, prefs.titles, { onWarning: deps.stderr, root });
   if (muted.length > 0) {
     deps.stderr(`Muted companies excluded from this run: ${muted.join(", ")}`);
   }

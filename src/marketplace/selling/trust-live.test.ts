@@ -36,6 +36,7 @@ function sellerInfoPayload(overrides: Record<string, unknown> = {}): string {
 function blankDoc(): TrackerDocument {
   return {
     version: 3,
+    ownerActivity: {},
     listings: [],
     leads: [],
     campaigns: [],

@@ -113,6 +113,7 @@ test("dedupe keeps a filtered record merged when its filterVersion is current", 
   assert.equal(result.merged.length, 1);
   assert.equal(result.merged[0]?.state, "filtered");
   assert.equal(result.duplicateCount, 1);
+});
 
 test("mergeSighting dedupes duplicate URLs even within the incoming sighting's own source list", () => {
   const existing = job();
@@ -129,5 +130,4 @@ test("mergeSighting dedupes duplicate URLs even within the incoming sighting's o
     ["https://a.test/1", "https://b.test/2"],
     "no duplicate links appended",
   );
-
-});
+})

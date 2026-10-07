@@ -35,6 +35,7 @@ function job(overrides: Partial<JobRecord> = {}): JobRecord {
     confidence: "high",
     rationale: "Partner marketing ownership matches her AWS track record.",
     gaps: [],
+    scoreDimensions: null,
     ...overrides,
   };
 }

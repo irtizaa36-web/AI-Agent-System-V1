@@ -1352,16 +1352,27 @@ const TOPLEVEL: readonly Command[] = [
           }
           lines.push(`advance: ${expired} hold(s) expired, ${advanced} queue(s) advanced.`);
         });
-        // 3. Due nudges (autonomous, outbox-deduped, watch-only threads skipped).
+        // 3. Owner-approved price ladders: due drops auto-execute on schedule (v3 plan §2).
+        await step("apply-drops", () => findCommand(SELLING, "apply-drops").run([], m, sub));
+        // 4. Due nudges (autonomous, outbox-deduped, watch-only threads skipped).
         await step("nudge", () => findCommand(SELLING, "nudge-due").run([], m, sub));
-        // 4. Stale-listing suggestions + auto-drop (disabled by default; no live check in the loop — cheap).
+        // 4b. Services lane: the single 48h quote follow-up nudge per request.
+        await step("services-nudge", () => findCommand(SERVICES, "nudge-due").run([], m, sub));
+        // 4c. Phase 4 (loop #5): trust decay — cheap, idempotent, no network.
+        await step("trust-decay", async () => {
+          await withState(m, async (doc) => {
+            const { doc: d2, decayed } = decayTrust(doc, m.now());
+            if (decayed.length > 0) lines.push(`trust-decay: ${decayed.length} contact(s) regressed toward neutral.`);
+            return { doc: d2, value: undefined };
+          });
+        });
+        // 5. Stale-listing suggestions (no live check in the loop — cheap).
         await step("health", () => findCommand(SELLING, "health").run([], m, sub));
       } finally {
         restore();
       }
       if (failures.length > 0) {
         lines.push(`parse failures: ${failures.length} (raw outputs logged to stderr as marketplace.parse_failure records).`);
-
         try {
           await withState(m, async (doc) => {
             let d2 = doc;
@@ -1372,22 +1383,6 @@ const TOPLEVEL: readonly Command[] = [
           /* recording the failures must not fail the run */
         }
       }
-      lines.push(`advance: ${expired} hold(s) expired, ${advanced} queue(s) advanced.`);
-      // 3. Owner-approved price ladders: due drops auto-execute on schedule (v3 plan §2).
-      await findCommand(SELLING, "apply-drops").run([], m, { ...deps, stdout: (s: string) => lines.push(s) });
-      // 4. Due nudges (autonomous, outbox-deduped).
-      await findCommand(SELLING, "nudge-due").run([], m, { ...deps, stdout: (s: string) => lines.push(s) });
-      // 4b. Services lane: the single 48h quote follow-up nudge per request.
-      await findCommand(SERVICES, "nudge-due").run([], m, { ...deps, stdout: (s: string) => lines.push(s) });
-      // 4c. Phase 4 (loop #5): trust decay — cheap, idempotent, no network.
-      await withState(m, async (doc) => {
-        const { doc: d2, decayed } = decayTrust(doc, now);
-        if (decayed.length > 0) lines.push(`trust-decay: ${decayed.length} contact(s) regressed toward neutral.`);
-        return { doc: d2, value: undefined };
-      });
-      // 5. Stale-listing suggestions (no live check in the loop — cheap).
-      await findCommand(SELLING, "health").run([], m, { ...deps, stdout: (s: string) => lines.push(s) });
-
       deps.stdout(lines.join("\n"));
     },
   },

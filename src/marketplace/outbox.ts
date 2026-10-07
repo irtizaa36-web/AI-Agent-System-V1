@@ -126,7 +126,6 @@ export function autoSendable(m: Pick<OutboxMessage, "kind" | "sendAuthority">): 
   if (HARD_STOP_KINDS.has(m.kind)) return false;
   return m.sendAuthority === "auto" || m.sendAuthority === "routine";
 }
-}
 
 export interface FlushResult {
   readonly doc: TrackerDocument;

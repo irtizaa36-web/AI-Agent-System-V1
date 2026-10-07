@@ -44,16 +44,6 @@ function senderAddress(from: string): string {
   return (angle ? angle[1] : from).trim();
 }
 
-/** Google puts a bare link to voice.google.com above the message; it is chrome, not message text. */
-const CHROME_HEADER_LINE = /^<https?:\/\/[^\s<>]+>\s*$/i;
-
-function stripChromeHeader(body: string): string {
-  const lines = body.replace(/\r\n/g, "\n").split("\n");
-  let start = 0;
-  while (start < lines.length && (lines[start].trim() === "" || CHROME_HEADER_LINE.test(lines[start].trim()))) start += 1;
-  return lines.slice(start).join("\n");
-}
-
 function stripFooter(body: string): string {
   const kept: string[] = [];
   for (const line of body.replace(/\r\n/g, "\n").split("\n")) {

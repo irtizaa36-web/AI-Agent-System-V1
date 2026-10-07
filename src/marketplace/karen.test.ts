@@ -251,7 +251,7 @@ const OWNER = "owner-test-id";
 test("owner activity: owner vs agent is told apart by sender id and the agent's own sends", () => {
   let doc = fixture();
   const agentBody = "Hey Buyer A — appreciate the offer, but the Standing Desk is firm at $100.";
-  doc = { ...doc, outbox: [...doc.outbox, { id: "o1", kind: "reply", channel: "messenger", threadId: "a-thread", recipient: "Buyer A", body: agentBody, stagedAt: NOW, status: "sent" }] };
+  doc = { ...doc, outbox: [...doc.outbox, { id: "o1", kind: "reply", channel: "messenger", threadId: "a-thread", recipient: "Buyer A", body: agentBody, stagedAt: NOW, status: "sent", sendAuthority: "per_message" }] };
   assert.equal(classifySender(doc, { threadId: "a-thread", senderId: OWNER, body: agentBody }, { ownerId: OWNER }), "agent");
   assert.equal(classifySender(doc, { threadId: "a-thread", senderId: OWNER, body: "sure, 3pm works" }, { ownerId: OWNER }), "owner");
   assert.equal(classifySender(doc, { threadId: "a-thread", senderId: "buyer-id", body: "hi" }, { ownerId: OWNER }), "counterparty");

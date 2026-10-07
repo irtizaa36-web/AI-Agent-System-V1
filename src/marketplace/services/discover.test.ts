@@ -17,6 +17,7 @@ const NOW = "2026-09-27T05:00:00Z";
 function fixtureDoc(): TrackerDocument {
   return {
     version: 3,
+    ownerActivity: {},
     listings: [],
     leads: [],
     campaigns: [],

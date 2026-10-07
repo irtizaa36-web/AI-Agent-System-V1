@@ -159,13 +159,8 @@ test("the repo has no other send path — the VM sender module is the only autho
   }
   for (const r of roots) await walk(r);
   assert.deepEqual(offenders, [], "send path found inside the pipeline package");
+});
 
-/**
- * The jobs dashboard server has no auth, so its bind address is a security
- * property: it must stay localhost-only no matter what --port is passed.
- * Tested as a static assertion on the module source rather than by starting
- * the server (serveDashboard blocks on SIGINT/SIGTERM).
- */
 test("the jobs dashboard binds 127.0.0.1 explicitly, never 0.0.0.0 or an env-driven host", async () => {
   const source = await readFile(join(__dirname, "jobs-commands.js"), "utf8");
   const listenCalls = [...source.matchAll(/server\.listen\(([^)]*)\)/g)].map((m) => m[1] as string);
@@ -174,7 +169,7 @@ test("the jobs dashboard binds 127.0.0.1 explicitly, never 0.0.0.0 or an env-dri
     assert.match(args, /"127\.0\.0\.1"/, `bind address must be explicit localhost: server.listen(${args})`);
     assert.doesNotMatch(args, /0\.0\.0\.0/, "never bind all interfaces");
   }
-});
+})
 
 test("jobs applied records her application and schedules the nudge; jobs stage walks the funnel", async () => {
   const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
@@ -222,7 +217,7 @@ test("jobs applied records her application and schedules the nudge; jobs stage w
   assert.match(stderr.join("\n"), /Cannot move application/);
   apps = await store.listApplications();
   assert.equal(apps[0]!.status, "screening", "illegal move changed nothing");
-});
+})
 
 test("jobs reject rejects the posting and explicitly does not mute the company", async () => {
   const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
@@ -255,7 +250,7 @@ test("jobs reject rejects the posting and explicitly does not mute the company",
   assert.equal(jobs[0]!.state, "rejected");
   assert.match(stdout.join("\n"), /NOT muted/);
   assert.deepEqual(await loadMutedCompanies("shivani", root), [], "rejecting a posting never mutes the company");
-});
+})
 
 test("jobs mute-company / unmute-company round-trips", async () => {
   const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
@@ -273,7 +268,7 @@ test("jobs mute-company / unmute-company round-trips", async () => {
   assert.deepEqual(await loadMutedCompanies("shivani", root), ["Noise Inc"]);
   assert.equal(await runJobsCommand(["unmute-company", "--profile", "shivani", "Noise Inc"], deps), 0);
   assert.deepEqual(await loadMutedCompanies("shivani", root), []);
-});
+})
 
 test("jobs linkedin-sync ingests applied/saved history idempotently and never rejects", async () => {
   const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
@@ -316,7 +311,7 @@ test("jobs linkedin-sync ingests applied/saved history idempotently and never re
   apps = await store.listApplications();
   assert.equal(apps.length, 3, "re-running creates nothing new");
   assert.match(stdout.join("\n"), /0 application record\(s\) created/);
-});
+})
 
 test("jobs mail-scan refuses without --dry-run and proposes links with it", async () => {
   const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
@@ -365,6 +360,4 @@ test("jobs mail-scan refuses without --dry-run and proposes links with it", asyn
   assert.match(report, /interview/);
   assert.match(report, /nothing was changed/);
   assert.ok(!report.includes("Dinner Sunday"), "non-recruiting mail is not proposed");
-});
-
-});
+})
