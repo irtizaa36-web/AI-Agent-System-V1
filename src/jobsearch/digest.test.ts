@@ -31,6 +31,7 @@ function job(overrides: Partial<JobRecord> = {}): JobRecord {
     confidence: "high",
     rationale: "Squarely your demand-gen background at the level you want.",
     gaps: [],
+    scoreDimensions: null,
     ...overrides,
   };
 }
@@ -142,4 +143,64 @@ test("the digest omits applicant text when the count is missing", () => {
   const markdown = renderDigest(summary({ shortlisted: [job({ applicantCount: null }), job({ id: "job-2" })] }));
   assert.doesNotMatch(markdown, /applicant/);
   assert.equal(digestPayload(summary()).shortlisted[0]?.applicantCount, null);
+
+test("the Also seen list caps at ten and names the remainder", () => {
+  const many = Array.from({ length: 25 }, (_, i) => job({ id: `job-${i}`, title: `Role ${i}`, score: 40 }));
+  const markdown = renderDigest(summary({ shortlisted: [], alsoSeen: many }));
+  const roleLines = markdown.split("\n").filter((l) => l.startsWith("- **"));
+  assert.equal(roleLines.length, 10, "only ten roles are listed");
+  assert.match(markdown, /- …and 15 more below the cutoff/);
+});
+
+test("a short Also seen list is shown in full with no overflow line", () => {
+  const few = Array.from({ length: 3 }, (_, i) => job({ id: `job-${i}`, title: `Role ${i}`, score: 40 }));
+  const markdown = renderDigest(summary({ shortlisted: [], alsoSeen: few }));
+  assert.doesNotMatch(markdown, /more below the cutoff/);
+});
+
+test("writeRejectionsLog writes one JSON line per rejected record with its bucketed reason", async () => {
+  const { mkdtemp, readFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { writeRejectionsLog } = await import("./digest.js");
+  const dir = await mkdtemp(join(tmpdir(), "rej-"));
+  const path = join(dir, "rejections-2026-09-28.jsonl");
+  await writeRejectionsLog(
+    [
+      job({ id: "r1", title: "Janitor", company: "Acme", filterReason: "Title outside the target cluster", state: "filtered" }),
+      job({ id: "r2", title: "VP Sales", company: "Beta", filterReason: "Posted 45 days ago, older than the 30-day limit", state: "filtered" }),
+    ],
+    path,
+  );
+  const lines = (await readFile(path, "utf8")).trim().split("\n");
+  assert.equal(lines.length, 2);
+  const first = JSON.parse(lines[0] as string) as Record<string, unknown>;
+  assert.equal(first["id"], "r1");
+  assert.equal(first["title"], "Janitor");
+  assert.equal(first["company"], "Acme");
+  assert.equal(first["reason"], "Title outside the target cluster");
+  const second = JSON.parse(lines[1] as string) as Record<string, unknown>;
+  assert.equal(second["reason"], "Posting older than the age limit", "reasons are bucketed, not raw strings");
+});
+
+test("shortlisted roles show the per-dimension fit breakdown when dimensions were stored", () => {
+  const markdown = renderDigest(
+    summary({
+      shortlisted: [
+        job({
+          scoreDimensions: { title: 90, experience: 80, skills: 85, location: 70, salary: 60, recency: 95 },
+        }),
+        job({ id: "job-2", scoreDimensions: null }),
+      ],
+    }),
+  );
+  assert.ok(markdown.includes("_Fit breakdown:_"), "breakdown line rendered");
+  assert.ok(markdown.includes("title 90"), "dimension values shown");
+  assert.ok(markdown.includes("recency 95"));
+  assert.equal(
+    markdown.split("_Fit breakdown:_").length - 1,
+    1,
+    "only the role with stored dimensions shows a breakdown",
+  );
+
 });

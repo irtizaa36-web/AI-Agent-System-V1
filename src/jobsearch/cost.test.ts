@@ -47,3 +47,18 @@ test("a realistic scoring run costs a few cents, not a few dollars", async () =>
 test("readLedger returns nothing for a ledger that does not exist yet", async () => {
   assert.deepEqual(await readLedger(join(tmpdir(), "definitely-missing-costs.jsonl")), []);
 });
+
+test("versioned model ids resolve to their base pricing tier", () => {
+  const base = costOf("claude-haiku-4-5", { inputTokens: 1_000_000, outputTokens: 1_000_000 });
+  assert.ok(base > 0, "base tier is priced");
+  assert.equal(
+    costOf("claude-haiku-4-5-20251001", { inputTokens: 1_000_000, outputTokens: 1_000_000 }),
+    base,
+    "a versioned id bills at its family's rate, not $0",
+  );
+  assert.equal(costOf("claude-sonnet-5-latest", { inputTokens: 1_000_000, outputTokens: 0 }), costOf("claude-sonnet-5", { inputTokens: 1_000_000, outputTokens: 0 }));
+});
+
+test("genuinely unknown models cost 0 rather than throwing", () => {
+  assert.equal(costOf("some-future-model-9", { inputTokens: 1_000_000, outputTokens: 1_000_000 }), 0);
+});

@@ -1,5 +1,5 @@
 import type { RawPosting } from "../records";
-import { fetchText, type Source } from "./source";
+import { fetchText, type AtsSourceOptions, type Source } from "./source";
 
 /**
  * Generic RSS/Atom reader for niche and professional-society boards, which
@@ -59,11 +59,13 @@ export function parseFeed(xml: string, company: string | null, sourceId: string,
     .filter((posting) => posting.title.length > 0 && posting.url.length > 0);
 }
 
-export function createFeedSource(company: string | null, feedUrl: string): Source {
+export function createFeedSource(company: string | null, feedUrl: string, options: AtsSourceOptions = {}): Source {
   const id = `feed:${feedUrl}`;
   return {
     id,
     company,
+    maxAgeDays: options.maxAgeDays,
+    priority: options.priority,
     async fetch() {
       const xml = await fetchText(feedUrl);
       return parseFeed(xml, company, id, new Date().toISOString());

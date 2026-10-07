@@ -1,5 +1,7 @@
-import type { Confidence, JobRecord, Preferences } from "./records";
+import type { Confidence, JobRecord, Preferences, ScoreDimensions, ScoreWeights } from "./records";
+import { SCORE_DIMENSION_KEYS } from "./records";
 import { salaryUnknown } from "./filter";
+import { affinityBonus, type AffinityModel } from "./affinity";
 import type { CostLedger } from "./cost";
 import type { ScoringClient } from "./scoring-client";
 
@@ -29,6 +31,12 @@ export interface ScoredPosting {
   readonly confidence: Confidence;
   readonly rationale: string;
   readonly gaps: readonly string[];
+  /**
+   * The six per-axis scores beside the composite. Null when the model didn't
+   * return a valid full set — the composite is what rank/cut read by
+   * default, so a null here changes nothing.
+   */
+  readonly dimensions: ScoreDimensions | null;
 }
 
 const RUBRIC = `You are scoring job postings for one candidate. For each posting, decide how well it fits.
@@ -54,9 +62,10 @@ Rules you must follow:
 - "gaps" lists requirements the posting asks for that the resume does not support. Name them plainly. An empty list means the resume genuinely covers the stated requirements.
 - If a posting does not state salary, that is unknown, not a negative. Do not speculate about pay.
 - The rationale is at most two short sentences, written to her, saying why this is or is not worth her time. No preamble, no restating the job title.
+- "dimensions" scores each axis 0-100 independently: title (title/level fit to her target roles), experience (years/level fit), skills (coverage of the stated requirements), location (remote/metro fit to her requirement), salary (stated pay against her floor — when pay is not stated, score 50: unknown, neither good nor bad), recency (how fresh the posting is, from the posted/firstSeen dates given). The composite "score" remains your own overall judgment, as before.
 
 Return ONLY a JSON array, no prose and no code fences, shaped exactly:
-[{"id":"<the id given>","score":<0-100>,"confidence":"low|medium|high","rationale":"<=2 sentences","gaps":["..."]}]
+[{"id":"<the id given>","score":<0-100>,"confidence":"low|medium|high","rationale":"<=2 sentences","gaps":["..."],"dimensions":{"title":<0-100>,"experience":<0-100>,"skills":<0-100>,"location":<0-100>,"salary":<0-100>,"recency":<0-100>}}]
 Return one object for every posting you were given, in the same order.`;
 
 /**
@@ -98,10 +107,18 @@ export function buildBatchPrompt(batch: readonly JobRecord[]): string {
     salary: salaryUnknown(record)
       ? "not stated"
       : `${record.salaryMin?.toLocaleString() ?? "?"}-${record.salaryMax?.toLocaleString() ?? "?"} ${record.salaryCurrency ?? ""}`.trim(),
+    posted: record.postedAt ?? "(not stated)",
+    firstSeen: record.firstSeenAt,
     description: record.summary,
   }));
 
   return `Score these ${batch.length} postings.\n\n${JSON.stringify(postings, null, 1)}`;
+}
+
+export interface ScoringParseResult {
+  readonly entries: readonly ScoredPosting[];
+  /** Malformed entries that were skipped, named by index — they join the digest's failure list rather than voiding the batch. */
+  readonly failures: readonly string[];
 }
 
 /**
@@ -109,8 +126,13 @@ export function buildBatchPrompt(batch: readonly JobRecord[]): string {
  * deliberately forgiving about the wrapper: a model that wraps valid JSON in
  * a code fence has not actually failed, but one that invents a score of 120
  * or drops the id has, and that must not pass silently into the digest.
+ *
+ * One malformed entry no longer voids the whole batch: each entry is parsed
+ * in its own try/catch, the bad one is skipped and named in `failures`, and
+ * the rest parse on. The batch-level throw stays for transport-shaped
+ * failures (not a JSON array at all), where nothing is salvageable.
  */
-export function parseScoringResponse(text: string): readonly ScoredPosting[] {
+export function parseScoringResponse(text: string): ScoringParseResult {
   const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
   const start = cleaned.indexOf("[");
   const end = cleaned.lastIndexOf("]");
@@ -121,25 +143,77 @@ export function parseScoringResponse(text: string): readonly ScoredPosting[] {
   const parsed: unknown = JSON.parse(cleaned.slice(start, end + 1));
   if (!Array.isArray(parsed)) throw new Error("scoring response did not parse to an array");
 
-  return parsed.map((entry, index) => {
-    const item = entry as Record<string, unknown>;
-    const id = typeof item["id"] === "string" ? item["id"] : null;
-    if (!id) throw new Error(`scoring entry ${index} has no id`);
-
-    const rawScore = Number(item["score"]);
-    if (!Number.isFinite(rawScore)) throw new Error(`scoring entry ${id} has a non-numeric score`);
-
-    const confidence = item["confidence"];
-    const gaps = Array.isArray(item["gaps"]) ? item["gaps"].filter((gap): gap is string => typeof gap === "string") : [];
-
-    return {
-      id,
-      score: Math.max(0, Math.min(100, Math.round(rawScore))),
-      confidence: confidence === "high" || confidence === "medium" || confidence === "low" ? confidence : "low",
-      rationale: typeof item["rationale"] === "string" ? item["rationale"].trim() : "",
-      gaps,
-    };
+  const entries: ScoredPosting[] = [];
+  const failures: string[] = [];
+  parsed.forEach((entry, index) => {
+    try {
+      entries.push(parseScoringEntry(entry, index));
+    } catch (error) {
+      failures.push(`scoring entry ${index}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   });
+  return { entries, failures };
+}
+
+function parseScoringEntry(entry: unknown, index: number): ScoredPosting {
+  const item = entry as Record<string, unknown>;
+  const id = typeof item["id"] === "string" ? item["id"] : null;
+  if (!id) throw new Error(`scoring entry ${index} has no id`);
+
+  const rawScore = Number(item["score"]);
+  if (!Number.isFinite(rawScore)) throw new Error(`scoring entry ${id} has a non-numeric score`);
+
+  const confidence = item["confidence"];
+  const gaps = Array.isArray(item["gaps"]) ? item["gaps"].filter((gap): gap is string => typeof gap === "string") : [];
+
+  return {
+    id,
+    score: Math.max(0, Math.min(100, Math.round(rawScore))),
+    confidence: confidence === "high" || confidence === "medium" || confidence === "low" ? confidence : "low",
+    rationale: typeof item["rationale"] === "string" ? item["rationale"].trim() : "",
+    gaps,
+    dimensions: parseScoreDimensions(item["dimensions"]),
+  };
+}
+
+/**
+ * Parses the six per-axis scores. All-or-nothing on purpose: a partial set
+ * would mislead re-weighting, so anything short of six finite 0-100 numbers
+ * stores null and the composite rules alone — the entry itself is never
+ * failed for bad dimensions (same isolation rule as every other field).
+ */
+export function parseScoreDimensions(value: unknown): ScoreDimensions | null {
+  if (typeof value !== "object" || value === null) return null;
+  const obj = value as Record<string, unknown>;
+  const dims = {} as Record<keyof ScoreDimensions, number>;
+  for (const key of SCORE_DIMENSION_KEYS) {
+    const raw = Number(obj[key]);
+    if (!Number.isFinite(raw)) return null;
+    dims[key] = Math.max(0, Math.min(100, Math.round(raw)));
+  }
+  return dims;
+}
+
+/**
+ * The score rank/cut actually read (Stage 12). Default (no `scoreWeights`,
+ * or no stored dimensions): the model's composite, exactly as before —
+ * cut/rank behavior is identical until a human re-weights. With weights set
+ * and dimensions present: the normalized weighted average, rounded.
+ */
+export function effectiveScore(record: JobRecord, prefs: Preferences): number {
+  const weights: ScoreWeights | null = prefs.scoreWeights;
+  const dims = record.scoreDimensions;
+  if (!weights || !dims) return record.score ?? 0;
+  let weighted = 0;
+  let total = 0;
+  for (const key of SCORE_DIMENSION_KEYS) {
+    const weight = weights[key];
+    if (!Number.isFinite(weight) || weight < 0) continue;
+    weighted += weight * dims[key];
+    total += weight;
+  }
+  if (total <= 0) return record.score ?? 0;
+  return Math.round(weighted / total);
 }
 
 export function chunk<T>(items: readonly T[], size: number): readonly (readonly T[])[] {
@@ -168,6 +242,12 @@ export async function scoreRecords(
   prefs: Preferences,
   client: ScoringClient,
   ledger: CostLedger,
+  /**
+   * Her applied-history affinity model (affinity.ts), or null when the
+   * LinkedIn pull carried no applied history. Optional so existing callers
+   * keep working — absent means no bonus, exactly the pre-affinity behavior.
+   */
+  affinity?: AffinityModel | null,
 ): Promise<ScoreRunResult> {
   if (records.length === 0) return { scored: [], failures: [] };
 
@@ -181,25 +261,45 @@ export async function scoreRecords(
         model: prefs.scoringModel,
         system,
         user: buildBatchPrompt(batch),
-        // ~180 tokens of JSON per posting, with headroom.
-        maxTokens: Math.max(1024, batch.length * 220),
+        // ~260 tokens of JSON per posting with the six dimensions, with headroom.
+        maxTokens: Math.max(1024, batch.length * 300),
       });
       await ledger.record("score", prefs.scoringModel, result.usage);
 
-      const byId = new Map(parseScoringResponse(result.text).map((entry) => [entry.id, entry]));
+      const parseResult = parseScoringResponse(result.text);
+      // Malformed entries are skipped individually, never voiding the batch —
+      // each one is named so it lands in the digest's failure list.
+      for (const failure of parseResult.failures) {
+        failures.push(failure);
+      }
+      const byId = new Map(parseResult.entries.map((entry) => [entry.id, entry]));
       for (const record of batch) {
         const judgement = byId.get(record.id);
         if (!judgement) {
           failures.push(`${record.company} — ${record.title}: model returned no score`);
           continue;
         }
-        scored.push({
+        const scoredRecord: JobRecord = {
           ...record,
-          state: judgement.score >= prefs.scoreCutoff ? "shortlisted" : "scored",
           score: judgement.score,
           confidence: judgement.confidence,
           rationale: judgement.rationale,
           gaps: judgement.gaps,
+          scoreDimensions: judgement.dimensions,
+        };
+        // Applied-history affinity: a capped, deterministic bonus on the
+        // composite, recorded in the rationale so it's auditable. Frozen
+        // cutoffs are untouched — the bonus only nudges roles that look
+        // like the ones she actually applies to.
+        const bonus = affinityBonus(scoredRecord, affinity ?? null);
+        const finalScore = Math.min(100, (scoredRecord.score ?? 0) + bonus.points);
+        const rationale = bonus.points > 0
+          ? `${scoredRecord.rationale ?? ""} [affinity +${bonus.points}: ${bonus.reasons.join("; ")}]`.trim()
+          : scoredRecord.rationale;
+        const withAffinity: JobRecord = { ...scoredRecord, score: finalScore, rationale };
+        scored.push({
+          ...withAffinity,
+          state: effectiveScore(withAffinity, prefs) >= prefs.scoreCutoff ? "shortlisted" : "scored",
         });
       }
     } catch (error) {

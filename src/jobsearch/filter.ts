@@ -22,7 +22,7 @@ export interface FilterOutcome {
 
 const PASSED: FilterOutcome = { passed: true, reason: null };
 
-export function applyFilters(record: JobRecord, prefs: Preferences, now: Date = new Date()): FilterOutcome {
+export function applyFilters(record: JobRecord, prefs: Preferences, now: Date = new Date(), entryMaxAgeDays?: number): FilterOutcome {
   const title = normalizeTitle(record.title);
   const company = normalizeCompany(record.company);
   const haystack = `${record.title}\n${record.company}\n${record.summary}`.toLowerCase();
@@ -59,7 +59,7 @@ export function applyFilters(record: JobRecord, prefs: Preferences, now: Date = 
   const experienceOutcome = checkExperience(record, prefs);
   if (!experienceOutcome.passed) return experienceOutcome;
 
-  const recencyOutcome = checkRecency(record, prefs, now);
+  const recencyOutcome = checkRecency(record, prefs, now, entryMaxAgeDays);
   if (!recencyOutcome.passed) return recencyOutcome;
 
   return checkSalary(record, prefs);
@@ -69,9 +69,13 @@ function checkLocation(record: JobRecord, prefs: Preferences): FilterOutcome {
   if (!prefs.remoteOnly) return PASSED;
   if (record.locationClass === "remote") return PASSED;
 
-  // A named metro re-admits onsite and hybrid roles in that place.
+  // A named metro re-admits onsite and hybrid roles in that place. The
+  // match is against the structured location field ONLY — never the summary
+  // prose. A role classified onsite on its structured field ("Chicago, IL")
+  // must not pass because its description happens to mention another city
+  // ("our Austin office is hiring").
   if (prefs.metros.length > 0) {
-    const place = `${record.rawLocation} ${record.summary.slice(0, 400)}`.toLowerCase();
+    const place = record.rawLocation.toLowerCase();
     if (prefs.metros.some((metro) => place.includes(metro.toLowerCase()))) return PASSED;
   }
 
@@ -149,6 +153,22 @@ function checkExperience(record: JobRecord, prefs: Preferences): FilterOutcome {
     }
   }
 
+  // An open-ended floor ("8+ years") is parsed as min=8, max=null, which the
+  // overlap check above reads as reaching to infinity — so a senior 12-year
+  // role passes a [3,6] band. When maxImpliedExperienceYears is set, cap the
+  // implication: an open floor whose stated minimum exceeds the cap rejects.
+  if (
+    prefs.maxImpliedExperienceYears !== null &&
+    record.experienceYearsMin !== null &&
+    record.experienceYearsMax === null &&
+    record.experienceYearsMin > prefs.maxImpliedExperienceYears
+  ) {
+    return {
+      passed: false,
+      reason: `Wants ${record.experienceYearsMin}+ years, open-ended above the ${prefs.maxImpliedExperienceYears}-year implied cap`,
+    };
+  }
+
   return PASSED;
 }
 
@@ -160,20 +180,41 @@ function checkExperience(record: JobRecord, prefs: Preferences): FilterOutcome {
  * Boundary: the limit is inclusive. A posting exactly `maxPostingAgeDays`
  * old is kept; anything strictly older is dropped. Shivani's profile sets 3,
  * so 2.9 days is kept, exactly 3.0 is kept, and 3.1 is dropped.
+ *
+ * The age is anchored on `min(firstSeenAt, postedAt)`, not on `postedAt`
+ * alone. Board date fields are often edit-stamps rather than first-published
+ * dates (Greenhouse's `updated_at` is a board-edit timestamp), so a 60-day
+ * role edited yesterday would otherwise read as "posted yesterday" and sail
+ * through the window. Our own first observation is the only date we can
+ * trust. This only ever tightens: `firstSeenAt >= postedAt` in the bumped
+ * case, so roles correctly dated lose nothing.
+ *
+ * `entryMaxAgeDays` is a per-watchlist-entry override for this posting's
+ * source board; it falls back to the global `maxPostingAgeDays`. Fast boards
+ * and slow feeds have different freshness profiles, and the override must be
+ * measured from a board's live age distribution, not guessed.
  */
-function checkRecency(record: JobRecord, prefs: Preferences, now: Date): FilterOutcome {
-  if (prefs.maxPostingAgeDays === null) return PASSED;
+function checkRecency(record: JobRecord, prefs: Preferences, now: Date, entryMaxAgeDays?: number): FilterOutcome {
+  const maxAgeDays = entryMaxAgeDays ?? prefs.maxPostingAgeDays;
+  if (maxAgeDays === null) return PASSED;
+  // No stated date: never rejected — the "don't guess" rule stands. Only a
+  // stated date can be measured against the window.
   if (record.postedAt === null) return PASSED;
 
   const posted = new Date(record.postedAt);
   if (Number.isNaN(posted.getTime())) return PASSED;
 
-  const ageDays = (now.getTime() - posted.getTime()) / (24 * 60 * 60 * 1000);
-  if (ageDays <= prefs.maxPostingAgeDays) return PASSED;
+  // Anchor on the earlier of the two: our own first observation is the only
+  // date we can trust, because board date fields are often edit-stamps.
+  const firstSeen = new Date(record.firstSeenAt);
+  const anchorMs = Number.isNaN(firstSeen.getTime()) ? posted.getTime() : Math.min(posted.getTime(), firstSeen.getTime());
+
+  const ageDays = (now.getTime() - anchorMs) / (24 * 60 * 60 * 1000);
+  if (ageDays <= maxAgeDays) return PASSED;
 
   return {
     passed: false,
-    reason: `Posted ${Math.floor(ageDays)} days ago, older than the ${prefs.maxPostingAgeDays}-day limit`,
+    reason: `Posted ${Math.floor(ageDays)} days ago, older than the ${maxAgeDays}-day limit`,
   };
 }
 
@@ -226,12 +267,17 @@ const REJECTION_BUCKETS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^Stated pay tops out at/, "Below the stated salary floor"],
 ];
 
+/** The filter stage that produced one rejection reason, or the raw reason when it matches nothing known. */
+export function bucketRejectionReason(reason: string): string {
+  return REJECTION_BUCKETS.find(([pattern]) => pattern.test(reason))?.[1] ?? reason;
+}
+
 /** Collapses a run's rejections down to the filter stage that produced each one, most common first. */
 export function summarizeRejections(records: readonly JobRecord[]): readonly RejectionBucket[] {
   const counts = new Map<string, number>();
   for (const record of records) {
     const reason = record.filterReason ?? "Unknown reason";
-    const bucket = REJECTION_BUCKETS.find(([pattern]) => pattern.test(reason))?.[1] ?? reason;
+    const bucket = bucketRejectionReason(reason);
     counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
   }
   return [...counts.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count);

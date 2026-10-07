@@ -1,7 +1,10 @@
-import type { JobRecord } from "./records";
-import { salaryUnknown, type RejectionBucket } from "./filter";
+import type { ApplicationRecord, JobRecord, ScoreDimensions } from "./records";
+import { SCORE_DIMENSION_KEYS } from "./records";
+import { salaryUnknown, bucketRejectionReason, type RejectionBucket } from "./filter";
 import type { SourceHealth } from "./health";
 import { summarizeHealth } from "./health";
+import { appendFile, mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 
 /**
  * Stage 10: the digest. Pure templating — no model writes this, because
@@ -25,6 +28,12 @@ export interface RunSummary {
   readonly scoredCount: number;
   readonly shortlisted: readonly JobRecord[];
   readonly alsoSeen: readonly JobRecord[];
+  /**
+   * Stage 13: how many shortlisted postings the liveness check confirmed
+   * dead and excluded from this digest. Absent = the stage was skipped
+   * (tests, offline runs) or nothing was removed.
+   */
+  readonly livenessRemovedCount?: number;
   readonly health: readonly SourceHealth[];
   readonly failures: readonly string[];
   readonly costUsd: number;
@@ -36,6 +45,9 @@ function money(usd: number): string {
   if (usd === 0) return "$0.00";
   return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
 }
+
+/** How many sub-cutoff roles the digest lists before collapsing the rest into a count line. */
+export const ALSO_SEEN_LIMIT = 10;
 
 function salaryLine(record: JobRecord): string {
   if (salaryUnknown(record)) return "Pay not stated";
@@ -54,6 +66,13 @@ export function applicantLine(record: JobRecord): string | null {
 function applicantSuffix(record: JobRecord): string {
   const line = applicantLine(record);
   return line ? ` · ${line}` : "";
+
+/** Stage 12: the per-axis breakdown under a shortlisted role, when the scoring response carried one. */
+function dimensionsLine(record: JobRecord): string | null {
+  const dims = record.scoreDimensions;
+  if (!dims) return null;
+  return `_Fit breakdown:_ ${SCORE_DIMENSION_KEYS.map((key) => `${key} ${dims[key]}`).join(" · ")}`;
+
 }
 
 function roleBlock(record: JobRecord, index: number): string {
@@ -64,6 +83,9 @@ function roleBlock(record: JobRecord, index: number): string {
     "",
     record.rationale || "_No rationale returned._",
   ];
+
+  const breakdown = dimensionsLine(record);
+  if (breakdown) lines.push("", breakdown);
 
   if (record.gaps.length > 0) {
     lines.push("", `**Gaps:** ${record.gaps.join("; ")}`);
@@ -98,10 +120,22 @@ export function renderDigest(summary: RunSummary): string {
     });
   }
 
+  if ((summary.livenessRemovedCount ?? 0) > 0) {
+    lines.push(
+      `_${summary.livenessRemovedCount} role${summary.livenessRemovedCount === 1 ? "" : "s"} removed — ` +
+        `posting no longer live when checked._`,
+      "",
+    );
+  }
+
   if (summary.alsoSeen.length > 0) {
     lines.push("## Also seen (below cutoff)", "");
-    for (const record of summary.alsoSeen) {
+    const shown = summary.alsoSeen.slice(0, ALSO_SEEN_LIMIT);
+    for (const record of shown) {
       lines.push(`- **${record.score ?? "?"}** · [${record.title} — ${record.company}](${record.applyUrl})`);
+    }
+    if (summary.alsoSeen.length > ALSO_SEEN_LIMIT) {
+      lines.push(`- …and ${summary.alsoSeen.length - ALSO_SEEN_LIMIT} more below the cutoff`);
     }
     lines.push("");
   }
@@ -145,6 +179,35 @@ export function renderDigest(summary: RunSummary): string {
   return lines.join("\n");
 }
 
+/** One rejected record as the rejections log serializes it: enough to see *which* roles a check killed, so filter tuning isn't blind. */
+export interface RejectionLogEntry {
+  readonly id: string;
+  readonly title: string;
+  readonly company: string;
+  /** The bucketed filter stage, not the full reason string — the digest's bucketing, per record. */
+  readonly reason: string;
+}
+
+/**
+ * Writes the run's rejected records to a JSONL log, one line each. Filter
+ * tuning is blind without this: `summarizeRejections` buckets counts, but
+ * nobody can see *which* roles a check killed to judge whether the check is
+ * too tight. Write-only side effect after the pipeline decision is made —
+ * the records are already rejected by this point, so the log can never
+ * change what the pipeline does.
+ */
+export async function writeRejectionsLog(rejected: readonly JobRecord[], path: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const lines = rejected.map((record) =>
+    JSON.stringify({
+      id: record.id,
+      title: record.title,
+      company: record.company,
+      reason: bucketRejectionReason(record.filterReason ?? "Unknown reason"),
+    } satisfies RejectionLogEntry),
+  );
+  await appendFile(path, lines.length > 0 ? `${lines.join("\n")}\n` : "", "utf8");
+}
 /** One shortlisted role as digestPayload serializes it — flattened from JobRecord, dashboard- and prompt-facing rather than the pipeline's own internal shape. */
 export interface DigestPayloadRole {
   readonly id: string;
@@ -161,6 +224,8 @@ export interface DigestPayloadRole {
   readonly rationale: string | null;
   readonly gaps: readonly string[];
   readonly applyUrl: string;
+  /** Stage 12: the six per-axis scores, when the scoring response carried them. */
+  readonly scoreDimensions: ScoreDimensions | null;
 }
 
 /**
@@ -218,8 +283,31 @@ export function digestPayload(summary: RunSummary): DigestPayload {
       rationale: record.rationale,
       gaps: record.gaps,
       applyUrl: record.applyUrl,
+      scoreDimensions: record.scoreDimensions,
     })),
     health: summary.health,
     failures: summary.failures,
   };
+}
+
+/**
+ * The CRM follow-up readout for the digest (Stage 14). Read-only: it lists
+ * the applications whose nudge date has passed so she can follow up herself.
+ * Nothing here sends, applies, or changes anything.
+ */
+export function renderFollowUpsSection(
+  apps: readonly ApplicationRecord[],
+  jobs: readonly JobRecord[],
+): string {
+  if (apps.length === 0) return "";
+  const jobById = new Map(jobs.map((job) => [job.id, job]));
+  const lines = ["## Follow-ups due", ""];
+  for (const app of apps) {
+    const job = jobById.get(app.jobId);
+    const label = job ? `${job.title} @ ${job.company}` : `application ${app.id}`;
+    const due = app.followUpDueAt ? app.followUpDueAt.slice(0, 10) : "unknown date";
+    lines.push(`- ${label} — ${app.status}, nudge was due ${due}`);
+  }
+  lines.push("", "These are reminders only — nothing is sent automatically.");
+  return lines.join("\n");
 }

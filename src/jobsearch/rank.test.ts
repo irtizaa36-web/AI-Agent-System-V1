@@ -31,6 +31,7 @@ function job(overrides: Partial<JobRecord> = {}): JobRecord {
     confidence: "high",
     rationale: "Good fit.",
     gaps: [],
+    scoreDimensions: null,
     ...overrides,
   };
 }
@@ -184,4 +185,35 @@ test("a low-applicant role wins a near-tie, but a big score gap still wins on me
 test("the applicant preference never excludes: every record survives sorting", () => {
   const records = [job({ id: "a", applicantCount: 900 }), job({ id: "b", applicantCount: null }), job({ id: "c", applicantCount: 5 })];
   assert.equal(sortByRank(records, prefs).length, 3);
+
+test("rankKey reads the effective score: default weights keep composite ordering", () => {
+  const withDims = job({
+    id: "a",
+    rawLocation: "Remote",
+    locationClass: "remote",
+    salaryMin: 100000,
+    salaryMax: 120000,
+    score: 70,
+    scoreDimensions: { title: 95, experience: 80, skills: 80, location: 80, salary: 80, recency: 80 },
+  });
+  assert.equal(rankKey(withDims, prefs), 70, "no weights: rankKey is the composite");
+});
+
+test("rankKey follows human re-weighting through the effective score", () => {
+  const weighted: Preferences = {
+    ...prefs,
+    scoreWeights: { title: 1, experience: 0, skills: 0, location: 0, salary: 0, recency: 0 },
+  };
+  const withDims = job({
+    id: "a",
+    rawLocation: "Remote",
+    locationClass: "remote",
+    salaryMin: 100000,
+    salaryMax: 120000,
+    score: 70,
+    scoreDimensions: { title: 95, experience: 50, skills: 50, location: 50, salary: 50, recency: 50 },
+  });
+  assert.equal(rankKey(withDims, weighted), 95, "re-weighted rankKey reads the title dimension");
+  assert.equal(rankKey(withDims, prefs), 70, "same record, default prefs: composite again");
+
 });

@@ -1,5 +1,5 @@
 import type { RawPosting } from "../records";
-import { fetchJson, type Source } from "./source";
+import { fetchJson, type AtsSourceOptions, type Source } from "./source";
 
 /** Ashby's public job board posting API. */
 
@@ -39,11 +39,13 @@ export function parseAshby(body: AshbyResponse, company: string, sourceId: strin
   }));
 }
 
-export function createAshbySource(company: string, boardToken: string): Source {
+export function createAshbySource(company: string, boardToken: string, options: AtsSourceOptions = {}): Source {
   const id = `ashby:${boardToken}`;
   return {
     id,
     company,
+    maxAgeDays: options.maxAgeDays,
+    priority: options.priority,
     async fetch() {
       const body = await fetchJson<AshbyResponse>(ashbyUrl(boardToken));
       return parseAshby(body, company, id, new Date().toISOString());

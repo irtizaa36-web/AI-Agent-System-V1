@@ -31,6 +31,7 @@ function job(overrides: Partial<JobRecord> = {}): JobRecord {
     confidence: null,
     rationale: null,
     gaps: [],
+    scoreDimensions: null,
     ...overrides,
   };
 }

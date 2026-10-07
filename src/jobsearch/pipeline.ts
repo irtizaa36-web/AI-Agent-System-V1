@@ -6,12 +6,17 @@ import { toJobRecord } from "./normalize";
 import { dedupe } from "./dedupe";
 import { applyFilters, summarizeRejections } from "./filter";
 import { sortByRank } from "./rank";
+import { effectiveScore } from "./score";
+import type { AffinityModel } from "./affinity";
 import { scoreRecords, type CandidateProfile } from "./score";
 import type { ScoringClient } from "./scoring-client";
 import { CostLedger } from "./cost";
 import { degraded, healthy, type SourceHealth } from "./health";
 import type { RunSummary } from "./digest";
+import { writeRejectionsLog } from "./digest";
+import { appendLivenessReviewQueue, checkLiveness, type LivenessFetcher } from "./liveness";
 import type { JobStore } from "../store/job-store";
+import { dirname, join } from "node:path";
 
 /**
  * The pipeline. One function, ten stages, in the order the plan set out.
@@ -36,6 +41,12 @@ export interface PipelineDeps {
   readonly prefs: Preferences;
   readonly profile: CandidateProfile;
   /**
+   * Her applied-history affinity model (affinity.ts), built by the caller
+   * from the LinkedIn pull file. Null/absent means no affinity signal —
+   * scoring behaves exactly as before.
+   */
+  readonly affinityModel?: AffinityModel | null;
+  /**
    * Absent means scoring is skipped this run — the run still fetches,
    * dedupes and filters. `scoringUnavailableReason` says why, so the
    * digest's failure message names the real cause rather than assuming it
@@ -48,10 +59,31 @@ export interface PipelineDeps {
   /** Short clause completing "...not scored: {reason}." Defaults to the API-key case for callers that don't pass one. */
   readonly scoringUnavailableReason?: string;
   readonly costLogPath: string;
+  /**
+   * Where the run's rejected records are written (one JSONL line each, id +
+   * title + company + bucketed reason) so filter tuning can see *which*
+   * roles a check killed. Defaults to `rejections-<date>.jsonl` next to the
+   * cost log. Write-only side effect after the pipeline decision is made.
+   */
+  readonly rejectionsLogPath?: string;
   /** How many sources to fetch at once. Deliberately small — politeness, not throughput. */
   readonly concurrency?: number;
   /** Off in tests, on in real runs. */
   readonly politeDelay?: boolean;
+  /**
+   * Pre-digest liveness validation (Stage 13). When provided, every
+   * shortlisted posting's apply URL is checked: confirmed-dead roles are
+   * excluded from the digest (counted, never silently dropped); ambiguous
+   * ones stay in AND are appended to the human review queue. Absent = the
+   * stage is skipped (tests, offline runs). The CLI passes the real fetcher.
+   */
+  readonly livenessFetcher?: LivenessFetcher;
+  /**
+   * Where ambiguous liveness cases are appended for human-paced spot-checks.
+   * Defaults to `liveness-review-queue.jsonl` next to the cost log. Appends
+   * only; never rewrites history.
+   */
+  readonly livenessQueuePath?: string;
 }
 
 /**
@@ -107,8 +139,13 @@ export async function runPipeline(deps: PipelineDeps): Promise<RunSummary> {
   const passed: JobRecord[] = [];
   const rejected: JobRecord[] = [];
   const filterNow = new Date(now);
+  const maxAgeBySource = new Map<string, number>();
+  for (const source of deps.sources) {
+    if (source.maxAgeDays !== undefined) maxAgeBySource.set(source.id, source.maxAgeDays);
+  }
   for (const record of fresh) {
-    const outcome = applyFilters(record, deps.prefs, filterNow);
+    const entryMaxAgeDays = record.sources.length > 0 ? maxAgeBySource.get(record.sources[0].sourceId) : undefined;
+    const outcome = applyFilters(record, deps.prefs, filterNow, entryMaxAgeDays);
     if (outcome.passed) {
       passed.push(record);
     } else {
@@ -116,11 +153,19 @@ export async function runPipeline(deps: PipelineDeps): Promise<RunSummary> {
     }
   }
 
+  // The rejections log is written after the pipeline decision is made: the
+  // records are already rejected, so the log can never change what the run
+  // does — it just makes the next tuning session non-blind.
+  await writeRejectionsLog(
+    rejected,
+    deps.rejectionsLogPath ?? join(dirname(deps.costLogPath), `rejections-${now.slice(0, 10)}.jsonl`),
+  );
+
   // Stage 8 — the only model call. Skipped entirely with no client configured.
   let scored: readonly JobRecord[] = [];
   let failures: readonly string[] = [];
   if (deps.scoringClient && passed.length > 0) {
-    const result = await scoreRecords(passed, deps.profile, deps.prefs, deps.scoringClient, ledger);
+    const result = await scoreRecords(passed, deps.profile, deps.prefs, deps.scoringClient, ledger, deps.affinityModel ?? null);
     scored = result.scored;
     failures = result.failures;
   } else if (passed.length > 0) {
@@ -137,13 +182,31 @@ export async function runPipeline(deps: PipelineDeps): Promise<RunSummary> {
 
   await deps.store.saveJobs([...scored, ...unscored, ...rejected, ...merged]);
 
-  // Stage 9 — rank and cut. The cutoff compares the model's actual score;
-  // the sort order is a separate, tunable display concern (rank.ts) — a role
-  // with no stated salary is never excluded by it, only shown lower.
+  // Stage 9 — rank and cut. The cutoff compares the effective score (the
+  // composite by default, the re-weighted average when the human set
+  // scoreWeights); the sort order is a separate, tunable display concern
+  // (rank.ts) — a role with no stated salary is never excluded by it, only
+  // shown lower.
   const ranked = sortByRank(scored, deps.prefs);
-  const aboveCutoff = ranked.filter((record) => (record.score ?? 0) >= deps.prefs.scoreCutoff);
+  const aboveCutoff = ranked.filter((record) => effectiveScore(record, deps.prefs) >= deps.prefs.scoreCutoff);
   const shortlisted = aboveCutoff.slice(0, deps.prefs.digestLimit);
   const alsoSeen = ranked.filter((record) => !shortlisted.includes(record));
+
+  // Stage 13 — pre-digest liveness validation. Dead postings leave the
+  // digest (counted in the summary); ambiguous ones stay in and join the
+  // human review queue for paced spot-checks. Skipped when no fetcher is
+  // injected, so tests and offline runs never touch the network.
+  let liveShortlisted: JobRecord[] = shortlisted;
+  let livenessRemovedCount = 0;
+  if (deps.livenessFetcher) {
+    const liveness = await checkLiveness(shortlisted, deps.livenessFetcher);
+    livenessRemovedCount = liveness.removed.length;
+    liveShortlisted = [...liveness.live];
+    await appendLivenessReviewQueue(
+      liveness.reviewQueue,
+      deps.livenessQueuePath ?? join(dirname(deps.costLogPath), "liveness-review-queue.jsonl"),
+    );
+  }
 
   const tokens = ledger.totalTokens();
 
@@ -157,8 +220,9 @@ export async function runPipeline(deps: PipelineDeps): Promise<RunSummary> {
     filteredCount: rejected.length,
     filterReasons: summarizeRejections(rejected),
     scoredCount: scored.length,
-    shortlisted,
+    shortlisted: liveShortlisted,
     alsoSeen,
+    livenessRemovedCount,
     health,
     failures,
     costUsd: ledger.total(),

@@ -11,6 +11,7 @@ import {
   looksLikeDirectText,
   parseFeedbackClassification,
   type ConversationTurn,
+  validatePreferenceValue,
 } from "./feedback";
 import { DEFAULT_PREFERENCES, type Preferences } from "./records";
 import { FakeScoringClient } from "./scoring-client";
@@ -177,6 +178,7 @@ test("buildRunContext surfaces real shortlisted roles and filter reasons from th
         rationale: "Strong match on program management background.",
         gaps: ["No stated healthcare experience"],
         applyUrl: "https://example.com/apply",
+        scoreDimensions: null,
       },
     ],
     health: [],
@@ -426,4 +428,28 @@ test("buildFeedbackReplyBody still prefers an actual answer/update/unclear body 
   const body = buildFeedbackReplyBody(classification, [], [], latestRun);
   assert.equal(body, "Your floor is $120,000.");
   assert.doesNotMatch(body, /Noted — nothing to change/);
+});
+
+test("validatePreferenceValue gates scoreWeights: null or six non-negative numbers with positive total", () => {
+  const good = { title: 1, experience: 1, skills: 2, location: 0.5, salary: 0, recency: 1 };
+  assert.equal(validatePreferenceValue("scoreWeights", null), true, "null means use the composite");
+  assert.equal(validatePreferenceValue("scoreWeights", good), true, "six non-negative weights accepted");
+  assert.equal(validatePreferenceValue("scoreWeights", { title: 1 }), false, "partial set rejected");
+  assert.equal(
+    validatePreferenceValue("scoreWeights", { title: 0, experience: 0, skills: 0, location: 0, salary: 0, recency: 0 }),
+    false,
+    "all-zero weights rejected — they'd divide by zero",
+  );
+  assert.equal(
+    validatePreferenceValue("scoreWeights", { title: -1, experience: 1, skills: 1, location: 1, salary: 1, recency: 1 }),
+    false,
+    "negative weights rejected",
+  );
+  assert.equal(validatePreferenceValue("scoreWeights", "title matters most"), false, "a string is not a weight set");
+});
+
+test("validatePreferenceValue keeps gating tailorSonnetExecution as a boolean", () => {
+  assert.equal(validatePreferenceValue("tailorSonnetExecution", true), true);
+  assert.equal(validatePreferenceValue("tailorSonnetExecution", false), true);
+  assert.equal(validatePreferenceValue("tailorSonnetExecution", "yes"), false);
 });

@@ -175,3 +175,39 @@ test("a missing resume names the exact per-profile path it looked for", async ()
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("savePreferences writes valid keys and names the rejected ones", async () => {
+  const root = await mkdtemp(join(tmpdir(), "prefs-gate-"));
+  try {
+    const profileDir = join(root, configDirFor("shivani"));
+    await mkdir(profileDir, { recursive: true });
+    const { rejectedKeys } = await savePreferences(
+      "shivani",
+      { salaryFloor: 150000, remoteOnly: "definitely" as unknown as boolean },
+      root,
+    );
+    assert.deepEqual(rejectedKeys, ["remoteOnly"], "the type-invalid key is named, not written");
+    const prefs = await loadPreferences("shivani", root);
+    assert.equal(prefs.salaryFloor, 150000);
+    assert.equal(prefs.remoteOnly, true, "the invalid value never touched the file");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("savePreferences rejects a type-invalid known field, but lets documentary comments through", async () => {
+  const root = await mkdtemp(join(tmpdir(), "prefs-gate-"));
+  try {
+    await mkdir(join(root, configDirFor("shivani")), { recursive: true });
+    const { rejectedKeys } = await savePreferences(
+      "shivani",
+      { salaryFloor: "lots" as unknown as number, _titles: "commentary, not a field" },
+      root,
+    );
+    assert.deepEqual(rejectedKeys, ["salaryFloor"], "type-invalid values reject per-key");
+    const raw = JSON.parse(await readFile(join(root, configDirFor("shivani"), "preferences.json"), "utf8")) as Record<string, unknown>;
+    assert.equal(raw["_titles"], "commentary, not a field", "documentary comments are never rejected");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

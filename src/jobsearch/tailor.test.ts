@@ -57,6 +57,7 @@ function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
     confidence: "high",
     rationale: "Strong overlap on GTM and lifecycle experience.",
     gaps: ["SQL for funnel analysis"],
+    scoreDimensions: null,
     ...overrides,
   };
 }

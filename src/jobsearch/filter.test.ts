@@ -32,6 +32,7 @@ function job(overrides: Partial<JobRecord> = {}): JobRecord {
     confidence: null,
     rationale: null,
     gaps: [],
+    scoreDimensions: null,
     ...overrides,
   };
 }
@@ -330,4 +331,110 @@ test("maxRequiredYearsExperience: rejection reason names the cap and buckets cle
 test("maxRequiredYearsExperience: null disables the cap and unstated years always pass", () => {
   assert.equal(applyFilters(job({ experienceYearsMin: 12 }), prefs).passed, true);
   assert.equal(applyFilters(job({ experienceYearsMin: null }), maxYearsPrefs).passed, true);
+
+// Fix 1 (revamp): recency anchors on min(firstSeenAt, postedAt), because
+// board date fields are often edit-stamps rather than first-published dates.
+test("a bumped old role — fresh postedAt, old firstSeenAt — is rejected by the age limit", () => {
+  const now = new Date("2026-09-13T00:00:00.000Z");
+  const outcome = applyFilters(
+    job({
+      postedAt: "2026-09-12T00:00:00.000Z", // edited yesterday, per the board
+      firstSeenAt: "2026-07-01T00:00:00.000Z", // but we first saw it 74 days ago
+    }),
+    { ...prefs, maxPostingAgeDays: 30 },
+    now,
+  );
+  assert.equal(outcome.passed, false, "the bump must not sail through the 30-day window");
+  assert.match(outcome.reason ?? "", /74 days ago, older than the 30-day limit/);
+});
+
+test("a genuinely fresh role passes even though the anchor logic now consults firstSeenAt", () => {
+  const now = new Date("2026-09-13T00:00:00.000Z");
+  const outcome = applyFilters(
+    job({ postedAt: "2026-09-12T00:00:00.000Z", firstSeenAt: "2026-09-12T00:00:00.000Z" }),
+    { ...prefs, maxPostingAgeDays: 30 },
+    now,
+  );
+  assert.equal(outcome.passed, true);
+});
+
+test("a dateless posting is still never rejected by the age limit, even when first seen long ago", () => {
+  const now = new Date("2026-09-13T00:00:00.000Z");
+  const outcome = applyFilters(
+    job({ postedAt: null, firstSeenAt: "2026-01-01T00:00:00.000Z" }),
+    { ...prefs, maxPostingAgeDays: 30 },
+    now,
+  );
+  assert.equal(outcome.passed, true, "dateless postings are never rejected — the 'don't guess' rule stands");
+});
+
+// Fix 4a (revamp): the metro re-admit gate reads the structured location field only.
+test("a metro named only in the summary prose no longer re-admits an onsite role", () => {
+  const outcome = applyFilters(
+    job({
+      locationClass: "onsite",
+      rawLocation: "Chicago, IL",
+      summary: "Own demand generation. Our Austin office is hiring!",
+    }),
+    { ...prefs, metros: ["Austin"] },
+  );
+  assert.equal(outcome.passed, false);
+  assert.match(outcome.reason ?? "", /Not remote/);
+});
+
+test("a metro named in the structured location field still re-admits an onsite role", () => {
+  const outcome = applyFilters(
+    job({ locationClass: "onsite", rawLocation: "Austin, TX" }),
+    { ...prefs, metros: ["Austin"] },
+  );
+  assert.equal(outcome.passed, true);
+});
+
+// Fix 4b (revamp): per-watchlist-entry maxAgeDays override.
+test("a per-board age override tightens the window for that board only", () => {
+  const now = new Date("2026-09-13T00:00:00.000Z");
+  const record = job({ postedAt: "2026-08-24T00:00:00.000Z", firstSeenAt: "2026-08-24T00:00:00.000Z" }); // 20 days old
+
+  const overridden = applyFilters(record, { ...prefs, maxPostingAgeDays: 30 }, now, 14);
+  assert.equal(overridden.passed, false);
+  assert.match(overridden.reason ?? "", /20 days ago, older than the 14-day limit/);
+
+  const globalDefault = applyFilters(record, { ...prefs, maxPostingAgeDays: 30 }, now);
+  assert.equal(globalDefault.passed, true, "absent the override, the global default still applies");
+});
+
+// Fix 4c (revamp): maxImpliedExperienceYears caps open-ended floors.
+test("an open-ended 8+ floor rejects under the implied cap, passes without it", () => {
+  const record = job({ experienceYearsMin: 8, experienceYearsMax: null });
+  // A band with no ceiling lets the overlap check pass, so only the
+  // implied cap can reject this senior role.
+  const band = { ...prefs, experienceYearsFloor: 3, experienceYearsCeiling: null };
+
+  const capped = applyFilters(record, { ...band, maxImpliedExperienceYears: 6 });
+  assert.equal(capped.passed, false);
+  assert.match(capped.reason ?? "", /open-ended above the 6-year implied cap/);
+
+  const uncapped = applyFilters(record, band);
+  assert.equal(uncapped.passed, true, "null cap preserves the historical behavior");
+});
+
+test("an open-ended floor within the implied cap still overlaps the band", () => {
+  const outcome = applyFilters(job({ experienceYearsMin: 4, experienceYearsMax: null }), {
+    ...prefs,
+    experienceYearsFloor: 3,
+    experienceYearsCeiling: 6,
+    maxImpliedExperienceYears: 6,
+  });
+  assert.equal(outcome.passed, true);
+});
+
+test("a closed range is unaffected by the implied cap", () => {
+  const outcome = applyFilters(job({ experienceYearsMin: 3, experienceYearsMax: 8 }), {
+    ...prefs,
+    experienceYearsFloor: 3,
+    experienceYearsCeiling: 6,
+    maxImpliedExperienceYears: 6,
+  });
+  assert.equal(outcome.passed, true, "the cap only constrains open-ended floors, never closed ranges");
+
 });

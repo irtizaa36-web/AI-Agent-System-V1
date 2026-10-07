@@ -1,15 +1,17 @@
 import type { JobRecord, Preferences } from "./records";
 import { salaryUnknown } from "./filter";
+import { effectiveScore } from "./score";
 
 /**
  * Stage 9's ordering rule, kept separate from the score itself on purpose.
  *
  * `JobRecord.score` is the model's honest judgment of fit and never changes
- * after scoring — it's what gets shown, and what `scoreCutoff` compares
- * against. This module answers a different question: given two roles that
- * already cleared the cutoff, which shows up first? A role with no stated
- * salary is nudged down the display order, not excluded and not re-scored —
- * "de-prioritize, don't exclude."
+ * after scoring — it's what gets shown. `effectiveScore` (score.ts) is what
+ * the key reads: the composite by default, the human's re-weighted average
+ * when `scoreWeights` is set. This module answers a different question: given
+ * two roles that already cleared the cutoff, which shows up first? A role
+ * with no stated salary is nudged down the display order, not excluded and
+ * not re-scored — "de-prioritize, don't exclude."
  */
 
 /**
@@ -47,7 +49,8 @@ export function applicantBonus(record: JobRecord, prefs: Preferences): number {
 /** The key roles are sorted by. Higher sorts first. Never persisted, never shown — display order only. */
 export function rankKey(record: JobRecord, prefs: Preferences): number {
   const penalty = salaryUnknown(record) ? prefs.unstatedSalaryRankPenalty : 0;
-  return (record.score ?? 0) - penalty + locationBonus(record, prefs) + applicantBonus(record, prefs);
+  return effectiveScore(record, prefs) - penalty + locationBonus(record, prefs) + applicantBonus(record, prefs);
+
 }
 
 /** Stable sort by rank key, highest first. Ties keep their original relative order. */

@@ -2,6 +2,7 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_PREFERENCES, type Preferences, type WatchlistEntry } from "./records";
 import type { CandidateProfile } from "./score";
+import { validatePreferenceValue } from "./feedback";
 import { isNotFoundError } from "../store/run-store";
 
 /**
@@ -98,12 +99,31 @@ export async function loadPreferences(profile: string, root = "."): Promise<Pref
  * this project's own preferences.json files rely on (see any of them) —
  * those aren't part of the `Preferences` type, so a naive round-trip
  * through it is how they'd quietly disappear.
+ *
+ * Every patch key passes the same field-type gate the feedback loop uses
+ * before it merges: a type-invalid value rejects that one key (named in
+ * the returned `rejectedKeys`, never written) while the rest still apply —
+ * rejections are per-key and surfaced, never partial or silent.
  */
-export async function savePreferences(profile: string, patch: Readonly<Record<string, unknown>>, root = "."): Promise<void> {
+export async function savePreferences(
+  profile: string,
+  patch: Readonly<Record<string, unknown>>,
+  root = ".",
+): Promise<{ readonly rejectedKeys: readonly string[] }> {
   const path = join(root, configDirFor(profile), "preferences.json");
   const raw = (await readJsonIfPresent<Record<string, unknown>>(path)) ?? {};
-  const merged = { ...raw, ...patch };
+  const rejectedKeys: string[] = [];
+  const safePatch: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (!validatePreferenceValue(key, value)) {
+      rejectedKeys.push(key);
+      continue;
+    }
+    safePatch[key] = value;
+  }
+  const merged = { ...raw, ...safePatch };
   await writeFile(path, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+  return { rejectedKeys };
 }
 
 export async function loadWatchlist(profile: string, root = "."): Promise<readonly WatchlistEntry[]> {

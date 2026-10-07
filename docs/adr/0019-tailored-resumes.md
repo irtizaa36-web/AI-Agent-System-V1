@@ -17,3 +17,45 @@ ADR 0014 closed by naming exactly what the scheduled pipeline would not do: "It 
 **What this deliberately does not do.** It does not auto-submit, auto-send, or prefill anything — no code path here reaches a browser, an email, or a form, and `ApplicationRecord.status` still has no value any code path sets except by a human action; the record this command creates starts at `queued` and stays there. It does not write cover letters or outreach (those are still Phase 3). It does not verify the draft against the resume after the fact — the structural rules make fabrication a prompt violation, not a tested property, and the Gaps section plus the draft stamp are what a human reviewer checks, which is why the output is stamped for her review and never for direct use. And it does not pretend a missing resume is fine: no base resume, no draft, loudly.
 
 **The open item this ADR leaves.** The real resume is gitignored and lives only on the machines that need it. The fabrication rules and the Gaps section were therefore proven here against synthetic fixtures, not her actual resume — the first real draft against a real posting should be read end to end by her before this is treated as trusted.
+
+---
+
+## Addendum 2026-09-28 — post-draft verification (Stage 11)
+
+The "What this deliberately does not do" section above says the draft step
+"does not verify the draft against the resume after the fact — the structural
+rules make fabrication a prompt violation, not a tested property." That
+statement is superseded as of this addendum. Stage 11 adds the verification
+as structure, next to the prompt rules rather than instead of them:
+
+- **Evidence ledger.** Every draft is now born with
+  `profile/<name>/tailored/<job-id>.ledger.json`, written by the same command
+  that writes the draft. It deterministically extracts employers, titles,
+  dates, metrics, degrees, and skills from the base resume, then classifies
+  every draft claim (bullets/sentences, minus the stamp header and the ##
+  Gaps section) as `confirmed` (traces verbatim to the resume),
+  `supportable` (partially traces — plausibly a rewording), or
+  `unsupported` (nothing traces). A claim stating a metric the resume never
+  states is unsupported no matter how well-worded the rest is. The classifier
+  is deliberately conservative — a heavily reworded-but-true claim can land
+  in `unsupported`, because a ledger that waves fabrications through is worse
+  than one that asks a human to glance twice. The ledger records the SHA-256
+  of the exact base resume text the draft was checked against.
+- **Drafts are born `pending-approval`.** The application record for a fresh
+  draft starts (or is reset to) `pending-approval`; a new draft never
+  inherits a previous approval.
+- **Explicit approval.** `jobs tailor --approve --job <id>` renders the
+  base-vs-tailored diff and flags the unsupported claims prominently. Without
+  `--confirm` it is review-only and changes nothing; `--confirm` is the
+  explicit tap that marks the ledger `ready` (timestamped) and advances the
+  application to `materials_ready`. Fail closed throughout: only a
+  `pending-approval` ledger can become ready, and a second confirmation is a
+  no-op that never re-stamps.
+- **Nothing exportable before approval.** The pipeline, the dashboard, and
+  every other command treat `pending-approval` as not-ready; the ready state
+  exists only after the human tap.
+
+The open item from the original ADR stands: the fabrication rules and the
+ledger were proven against synthetic fixtures, not her actual resume — the
+first real draft against a real posting should still be read end to end by
+her before this is treated as trusted.

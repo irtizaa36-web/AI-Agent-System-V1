@@ -1,5 +1,5 @@
 import type { RawPosting } from "../records";
-import { fetchJson, type Source } from "./source";
+import { fetchJson, type AtsSourceOptions, type Source } from "./source";
 
 /** Lever's public postings API — structured JSON, published for public consumption. */
 
@@ -36,11 +36,13 @@ export function parseLever(postings: readonly LeverPosting[], company: string, s
   });
 }
 
-export function createLeverSource(company: string, boardToken: string): Source {
+export function createLeverSource(company: string, boardToken: string, options: AtsSourceOptions = {}): Source {
   const id = `lever:${boardToken}`;
   return {
     id,
     company,
+    maxAgeDays: options.maxAgeDays,
+    priority: options.priority,
     async fetch() {
       const body = await fetchJson<readonly LeverPosting[]>(leverUrl(boardToken));
       return parseLever(Array.isArray(body) ? body : [], company, id, new Date().toISOString());

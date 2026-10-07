@@ -39,7 +39,7 @@ export const ALLOWED_PATCH_FIELDS = [
 
 export type AllowedPatchField = (typeof ALLOWED_PATCH_FIELDS)[number];
 
-function isAllowedField(value: string): value is AllowedPatchField {
+export function isAllowedField(value: string): value is AllowedPatchField {
   return (ALLOWED_PATCH_FIELDS as readonly string[]).includes(value);
 }
 
@@ -395,7 +395,7 @@ function buildPureAckReply(latestRun?: DigestPayload): string {
   return `Noted — nothing to change on my end. Still watching ${sources} source${sources === 1 ? "" : "s"}; ${matches} new ${matches === 1 ? "match" : "matches"} in the latest digest.`;
 }
 
-function matchesFieldType(field: AllowedPatchField, value: unknown): boolean {
+export function matchesFieldType(field: AllowedPatchField, value: unknown): boolean {
   switch (field) {
     case "titles":
     case "titleExclusions":
@@ -415,4 +415,56 @@ function matchesFieldType(field: AllowedPatchField, value: unknown): boolean {
     case "scoreCutoff":
       return typeof value === "number" && value >= 0 && value <= 100;
   }
+}
+
+/**
+ * The same field-type gate `savePreferences` (config.ts) routes raw patches
+ * through before merging them into preferences.json. Allow-listed feedback
+ * fields reuse `matchesFieldType`; the remaining mechanical Preferences
+ * fields get their own checks here so a type-invalid write cannot corrupt
+ * the next run through this path either. Keys that are not Preferences
+ * fields at all (the "_titles"-style documentary comments this project's
+ * preferences.json files rely on) always pass — the gate rejects bad
+ * values, never comments.
+ */
+export function validatePreferenceValue(field: string, value: unknown): boolean {
+  if (isAllowedField(field)) return matchesFieldType(field, value);
+  const isNumber = (v: unknown): v is number => typeof v === "number";
+  switch (field) {
+    case "salaryCurrency":
+    case "scoringModel":
+      return typeof value === "string";
+    case "salaryFloor":
+    case "experienceYearsFloor":
+    case "experienceYearsCeiling":
+    case "maxPostingAgeDays":
+    case "maxImpliedExperienceYears":
+      return value === null || isNumber(value);
+    case "locationPriorityStep":
+    case "unstatedSalaryRankPenalty":
+    case "digestLimit":
+    case "postingTokenBudget":
+    case "scoringBatchSize":
+    case "rawRetentionDays":
+      return isNumber(value);
+    case "remoteOnly":
+    case "usRemoteOnly":
+    case "tailorSonnetExecution":
+      return typeof value === "boolean";
+    case "scoreWeights":
+      return value === null || isValidScoreWeights(value);
+    default:
+      return true;
+  }
+}
+
+/** Six non-negative finite weights, one per scoring dimension — or null for "use the composite". */
+function isValidScoreWeights(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  const keys = ["title", "experience", "skills", "location", "salary", "recency"];
+  if (!keys.every((key) => typeof obj[key] === "number" && Number.isFinite(obj[key]) && (obj[key] as number) >= 0)) {
+    return false;
+  }
+  return keys.reduce((sum, key) => sum + (obj[key] as number), 0) > 0;
 }

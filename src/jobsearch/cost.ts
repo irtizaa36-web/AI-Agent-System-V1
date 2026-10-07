@@ -43,9 +43,14 @@ export interface CostEntry {
  * Dollars for one call. An unknown model costs 0 rather than throwing — a
  * pricing table that has fallen behind a model rename must not be able to
  * fail a scheduled run at 8am.
+ *
+ * Lookup is longest-prefix-match on the PRICING keys, not exact-match: a
+ * versioned model id (e.g. a future `claude-haiku-4-5-20251001`) must still
+ * bill at its family's rate instead of silently reading $0.00. Genuinely
+ * unknown models still cost 0.
  */
 export function costOf(model: string, usage: Usage): number {
-  const price = PRICING[model];
+  const price = priceFor(model);
   if (!price) return 0;
 
   const cacheRead = usage.cacheReadTokens ?? 0;
@@ -53,6 +58,18 @@ export function costOf(model: string, usage: Usage): number {
   const billedInput = usage.inputTokens + cacheWrite * 1.25 + cacheRead * CACHE_READ_DISCOUNT;
 
   return (billedInput / 1_000_000) * price.input + (usage.outputTokens / 1_000_000) * price.output;
+}
+
+function priceFor(model: string): { readonly input: number; readonly output: number } | undefined {
+  let best: { readonly input: number; readonly output: number } | undefined;
+  let bestLength = -1;
+  for (const key of Object.keys(PRICING)) {
+    if (model.startsWith(key) && key.length > bestLength) {
+      best = PRICING[key];
+      bestLength = key.length;
+    }
+  }
+  return best;
 }
 
 export class CostLedger {
