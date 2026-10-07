@@ -5,6 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
  * The evidence ledger for a tailored resume draft (Stage 11).
  *
  * ADR 0029 shipped the draft step with a structural no-fabrication rule but
+
  * no post-draft verification: the model was told not to invent, and nobody
  * checked. This module is the check. After a draft is written, every claim
  * in it is extracted and classified against the base resume, deterministically

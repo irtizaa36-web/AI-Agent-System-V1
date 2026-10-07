@@ -49,6 +49,43 @@ export type JobState = "seen" | "filtered" | "scored" | "shortlisted" | "rejecte
 
 export type Confidence = "low" | "medium" | "high";
 
+/**
+ * The six scoring dimensions (Stage 12). Each is the model's 0-100 judgment
+ * on one axis: title/level fit, experience fit, skills coverage, location
+ * fit, salary fit, and recency. Stored beside the composite `score`, never
+ * instead of it — rank/cut read the composite by default, and the dimensions
+ * exist so the digest can show the breakdown and a human can re-weight.
+ * All-or-nothing: a partial set would mislead weighting, so a response that
+ * doesn't carry all six valid numbers stores null here.
+ */
+export interface ScoreDimensions {
+  readonly title: number;
+  readonly experience: number;
+  readonly skills: number;
+  readonly location: number;
+  readonly salary: number;
+  readonly recency: number;
+}
+
+/** Human re-weighting for the six dimensions. Null (default) means the model's composite rules, unchanged. */
+export interface ScoreWeights {
+  readonly title: number;
+  readonly experience: number;
+  readonly skills: number;
+  readonly location: number;
+  readonly salary: number;
+  readonly recency: number;
+}
+
+export const SCORE_DIMENSION_KEYS: ReadonlyArray<keyof ScoreDimensions> = [
+  "title",
+  "experience",
+  "skills",
+  "location",
+  "salary",
+  "recency",
+];
+
 export interface JobSource {
   readonly sourceId: string;
   readonly url: string;
@@ -104,17 +141,38 @@ export interface JobRecord {
   readonly rationale: string | null;
   /** Requirements the resume does not support. Stated plainly, never papered over. */
   readonly gaps: readonly string[];
+  /**
+   * The six per-axis scores beside the composite. `null` when the scoring
+   * response didn't carry a valid full set (older runs, malformed
+   * dimensions). Rank/cut use `effectiveScore` (score.ts), which reads the
+   * composite unless the human set `scoreWeights` — so a null here never
+   * changes behavior.
+   */
+  readonly scoreDimensions: ScoreDimensions | null;
 }
 
 export type ApplicationStatus =
+  | "saved"
   | "queued"
   | "pending-approval"
   | "materials_ready"
   | "prefilled"
   | "submitted_by_human"
+  | "applied"
+  | "screening"
+  | "interview"
+  | "offer"
   | "responded"
   | "rejected"
   | "withdrawn";
+
+/**
+ * Where an application record came from. `"pipeline"` is the default for
+ * records the tailoring flow creates (absent on older records means the
+ * same); `"linkedin"` marks records synced from the supervised LinkedIn
+ * pull's applied/saved history — her real LinkedIn applications, not ours.
+ */
+export type ApplicationSource = "pipeline" | "linkedin";
 
 export interface ApplicationRecord {
   readonly id: string;
@@ -131,6 +189,8 @@ export interface ApplicationRecord {
   readonly outcome: string | null;
   readonly rejectionReason: string | null;
   readonly notes: readonly string[];
+  /** Absent means `"pipeline"` — older records were all created that way. */
+  readonly source?: ApplicationSource;
 }
 
 export type AtsType = "greenhouse" | "lever" | "ashby" | "feed";
@@ -158,6 +218,19 @@ export interface WatchlistEntry {
   readonly atsType: AtsType;
   /** Greenhouse/Lever/Ashby board token, or the feed URL for `feed`. */
   readonly boardToken: string;
+  /**
+   * Optional per-board freshness window in days, overriding the global
+   * `maxPostingAgeDays` for this entry. Fast boards and slow feeds have
+   * different freshness profiles — set this from the board's measured live
+   * age distribution, never guessed. Absent means the global default.
+   */
+  readonly maxAgeDays?: number;
+  /**
+   * Optional priority flag: this company's roles surface first in the
+   * digest under "Priority companies" (a monitored lane on the existing
+   * adapters, not a separate source). Absent/false means the normal sweep.
+   */
+  readonly priority?: boolean;
 }
 
 /** config/job-search/<profile>/preferences.json — the deterministic filters, as data. */
@@ -203,6 +276,18 @@ export interface Preferences {
    */
   readonly maxRequiredYearsExperience: number | null;
   /**
+   * Cap on what an open-ended experience floor ("5+ years", read as
+   * min=5, max=null) is allowed to imply. A posting that says "5+" really
+   * means "5 and up, unbounded", so the normal overlap check treats it as
+   * reaching to infinity and a senior 12-year role would pass a [3,6] band.
+   * When this is set, an open-ended floor whose stated minimum exceeds it
+   * rejects: "8+" against a [3,6] band with a cap of 6 rejects, while "4+"
+   * still overlaps. `null` (default) preserves the historical behavior —
+   * open floors are never rejected on implied years alone.
+   */
+  readonly maxImpliedExperienceYears: number | null;
+
+  /**
    * Reject a posting whose stated post date is older than this many days.
    * `null` disables the check. A posting with no stated date at all is
    * never rejected by this — same "don't guess" rule as everywhere else.
@@ -230,6 +315,21 @@ export interface Preferences {
   /** Minimum score to reach the digest's main list. */
   readonly scoreCutoff: number;
   /**
+   * Human re-weighting for the six scoring dimensions (Stage 12). `null`
+   * (default) means the model's composite rules and cut/rank behavior is
+   * exactly what it was before dimensions existed. When set, the effective
+   * score is the weighted average of the stored dimensions (weights are
+   * normalized, so they need not sum to 1) — but only for records that
+   * actually carry dimensions; anything else falls back to the composite.
+   */
+  readonly scoreWeights: ScoreWeights | null;
+  /**
+   * Round-2 tailoring model gate (Stage 12). `false` (default) executes the
+   * tailoring plan with Haiku; `true` upgrades round 2 to Sonnet. Round 1
+   * (gap analysis + plan) is always Haiku.
+   */
+  readonly tailorSonnetExecution: boolean;
+  /**
    * Points subtracted from a role's DISPLAY-ORDER rank (never from its
    * stored `score`, and never from whether it clears `scoreCutoff`) when it
    * doesn't state a salary. Nudges pay-transparent roles toward the top of
@@ -245,8 +345,6 @@ export interface Preferences {
   readonly scoringBatchSize: number;
   /** Model used for batch scoring. */
   readonly scoringModel: string;
-  /** Round 2 of `jobs tailor` uses Sonnet when true, Haiku (default) when false. Round 1 is always Haiku. */
-  readonly tailorSonnetExecution: boolean;
   /** Days to keep raw posting bodies on disk before pruning. The JobRecord is kept forever. */
   readonly rawRetentionDays: number;
 }
@@ -263,6 +361,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   experienceYearsFloor: null,
   experienceYearsCeiling: null,
   maxRequiredYearsExperience: null,
+  maxImpliedExperienceYears: null,
+
   maxPostingAgeDays: null,
   lowApplicantThreshold: 200,
   lowApplicantRankBonus: 3,
@@ -270,11 +370,12 @@ export const DEFAULT_PREFERENCES: Preferences = {
   industryExclusions: [],
   companyExclusions: [],
   scoreCutoff: 65,
+  scoreWeights: null,
+  tailorSonnetExecution: false,
   unstatedSalaryRankPenalty: 3,
   digestLimit: 8,
   postingTokenBudget: 600,
   scoringBatchSize: 15,
   scoringModel: "claude-haiku-4-5",
-  tailorSonnetExecution: false,
   rawRetentionDays: 90,
 };

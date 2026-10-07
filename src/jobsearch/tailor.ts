@@ -15,6 +15,7 @@ import { costOf } from "./cost";
  *
  * The port is the same `ScoringClient` the scoring path uses (same client
  * setup, same Claude Code CLI, same error handling in scoring-client.ts) —
+
  * no new client class, because drafting needs nothing scoring's port doesn't
  * already provide. Round 1 is always the cheapest capable model; round 2
  * defaults there too, per the standing policy for drafting work.

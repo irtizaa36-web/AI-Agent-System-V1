@@ -22,8 +22,15 @@ export interface DedupeResult {
 
 /** Merges one incoming sighting into an existing record. */
 export function mergeSighting(existing: JobRecord, incoming: JobRecord): JobRecord {
+  // Dedupe the union through a Set: the same posting re-crawled must not
+  // append a duplicate link, whether the duplicate comes from the stored
+  // record or from within the incoming sighting's own source list.
   const knownUrls = new Set(existing.sources.map((source) => source.url));
-  const addedSources = incoming.sources.filter((source) => !knownUrls.has(source.url));
+  const addedSources = incoming.sources.filter((source) => {
+    if (knownUrls.has(source.url)) return false;
+    knownUrls.add(source.url);
+    return true;
+  });
 
   return {
     ...existing,

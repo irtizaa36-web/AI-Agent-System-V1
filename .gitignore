@@ -14,3 +14,7 @@ profile/*
 !profile/README.md
 # Per-run model spend ledger.
 logs/
+
+# Disposable live-data verification scripts (steward rule: prove filter/scoring
+# changes against real boards). Never committed.
+scratchpad/

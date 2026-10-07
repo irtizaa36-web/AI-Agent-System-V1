@@ -31,6 +31,7 @@ function job(overrides: Partial<JobRecord> = {}): JobRecord {
     confidence: null,
     rationale: null,
     gaps: [],
+    scoreDimensions: null,
     ...overrides,
   };
 }
@@ -113,3 +114,20 @@ test("dedupe keeps a filtered record merged when its filterVersion is current", 
   assert.equal(result.merged[0]?.state, "filtered");
   assert.equal(result.duplicateCount, 1);
 });
+
+test("mergeSighting dedupes duplicate URLs even within the incoming sighting's own source list", () => {
+  const existing = job();
+  const incoming = job({
+    sources: [
+      { sourceId: "greenhouse:acme", url: "https://a.test/1", fetchedAt: "2026-09-13T09:00:00.000Z" }, // already known
+      { sourceId: "lever:acme", url: "https://b.test/2", fetchedAt: "2026-09-13T09:00:00.000Z" }, // new
+      { sourceId: "lever:acme", url: "https://b.test/2", fetchedAt: "2026-09-13T09:00:00.000Z" }, // same URL twice
+    ],
+  });
+  const merged = mergeSighting(existing, incoming);
+  assert.deepEqual(
+    merged.sources.map((s) => s.url),
+    ["https://a.test/1", "https://b.test/2"],
+    "no duplicate links appended",
+  );
+})

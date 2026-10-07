@@ -13,15 +13,16 @@ import { createFeedSource } from "./feed";
  */
 export function sourcesFromWatchlist(entries: readonly WatchlistEntry[]): readonly Source[] {
   return entries.map((entry) => {
+    const options = { maxAgeDays: entry.maxAgeDays, priority: entry.priority };
     switch (entry.atsType) {
       case "greenhouse":
-        return createGreenhouseSource(entry.company, entry.boardToken);
+        return createGreenhouseSource(entry.company, entry.boardToken, options);
       case "lever":
-        return createLeverSource(entry.company, entry.boardToken);
+        return createLeverSource(entry.company, entry.boardToken, options);
       case "ashby":
-        return createAshbySource(entry.company, entry.boardToken);
+        return createAshbySource(entry.company, entry.boardToken, options);
       case "feed":
-        return createFeedSource(entry.company, entry.boardToken);
+        return createFeedSource(entry.company, entry.boardToken, options);
       default: {
         const exhaustive: never = entry.atsType;
         throw new Error(`Unknown ATS type in watchlist: ${String(exhaustive)}`);

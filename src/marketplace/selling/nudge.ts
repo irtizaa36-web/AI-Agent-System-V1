@@ -77,6 +77,9 @@ export function sendDueNudges(
       body,
       listingId: lead.listingId,
       leadId: lead.id,
+      // v3 plan §2: nudges stage at "routine" — his standing decision is
+      // full auto on routine, so flush dispatches these without a card.
+      sendAuthority: "routine",
     }, nowIso);
     next = stagedMsg.doc;
     const retired = level >= NUDGE_LEVELS.length;

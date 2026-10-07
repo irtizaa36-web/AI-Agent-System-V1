@@ -13,7 +13,17 @@ import type { RawPosting } from "../records";
 export interface Source {
   readonly id: string;
   readonly company: string | null;
+  /** Per-board freshness override from the watchlist entry, when set. */
+  readonly maxAgeDays?: number;
+  /** Priority-lane flag from the watchlist entry, when set. */
+  readonly priority?: boolean;
   fetch(): Promise<readonly RawPosting[]>;
+}
+
+/** Per-entry tuning carried from the watchlist onto a Source. Optional throughout — absent means global defaults. */
+export interface AtsSourceOptions {
+  readonly maxAgeDays?: number;
+  readonly priority?: boolean;
 }
 
 export interface FetchOptions {

@@ -1,6 +1,5 @@
 {
   "_comment": "Deterministic filters. Edit this file, not the code. Every value here runs before any model call, so tightening these is the cheapest way to improve the digest.",
-
   "titles": [
     "program manager",
     "marketing program manager",
@@ -29,50 +28,69 @@
     "marketing operations manager",
     "partner marketing manager",
     "program manager, executive engagement",
-    "vendor manager"
+    "vendor manager",
+    "partnerships manager",
+    "partner manager",
+    "strategic partnerships",
+    "ecosystem marketing",
+    "abm manager",
+    "account based marketing",
+    "customer marketing manager",
+    "channel marketing manager",
+    "alliances manager",
+    "partner success manager"
   ],
-  "_titles": "UPDATE Sep 29: this list is no longer a hard filter. Per the owner, roles need not match a title list as long as they align with her experience; title/experience fit is now judged by the scoring pass, and this list is only a soft hint to the scorer. Earlier notes below describe the retired gate. Merged from her resume (Marketing Program Manager, Vendor Manager) and her own ChatGPT-suggested title list. An earlier draft dropped the bare 'program manager' on the theory that it matched irrelevant Technical/Federal PM postings too — true, but re-checked against a live run and reversed: title matching runs BEFORE the location/salary filters, so an irrelevant onsite match costs nothing in tokens, it's rejected before any model call. Removing it had a real cost with no real saving: it silently dropped two genuinely good GitLab matches ('Senior Program Manager, Enterprise Technology & AI', 'Principal Program Manager, Go-To-Market') whose titles don't contain any of the more specific phrases below, because substring matching is literal and word order varies. Kept broad on purpose now. UPDATE Sep 14: 'word order varies' turned out to be a real bug, not just a reason to keep the list broad — filter.ts matched titles as a literal substring, so 'GTM Strategy & Operations Manager' never matched the configured 'strategy & operations manager' pattern at all. Fixed in titleMatchesTarget (normalize.ts) to match on word presence regardless of order; measured against the Sep 14 job store, that alone rescued 14 on-profile roles (Vanta, Snowflake, Stripe, Notion, Zapier, Docker...) that the old check silently dropped. This list can probably shrink now that the matcher isn't literal, but nothing here was removed yet — only add, don't subtract, until a live run is checked against the smaller list.",
-
-  "titleExclusions": ["intern", "internship", "co-op", "contractor", "temporary", "principal", "director", "vp", "president", "head of", "chief"],
+  "_titles": "UPDATE Sep 29: this list is no longer a hard filter. Per the owner, roles need not match a title list as long as they align with her experience; title/experience fit is now judged by the scoring pass, and this list is only a soft hint to the scorer. Earlier notes below describe the retired gate. Merged from her resume (Marketing Program Manager, Vendor Manager) and her own ChatGPT-suggested title list. An earlier draft dropped the bare 'program manager' on the theory that it matched irrelevant Technical/Federal PM postings too — true, but re-checked against a live run and reversed: title matching runs BEFORE the location/salary filters, so an irrelevant onsite match costs nothing in tokens, it's rejected before any model call. Removing it had a real cost with no real saving: it silently dropped two genuinely good GitLab matches ('Senior Program Manager, Enterprise Technology & AI', 'Principal Program Manager, Go-To-Market') whose titles don't contain any of the more specific phrases below, because substring matching is literal and word order varies. Kept broad on purpose now. UPDATE Sep 14: 'word order varies' turned out to be a real bug, not just a reason to keep the list broad — filter.ts matched titles as a literal substring, so 'GTM Strategy & Operations Manager' never matched the configured 'strategy & operations manager' pattern at all. Fixed in titleMatchesTarget (normalize.ts) to match on word presence regardless of order; measured against the Sep 14 job store, that alone rescued 14 on-profile roles (Vanta, Snowflake, Stripe, Notion, Zapier, Docker...) that the old check silently dropped. This list can probably shrink now that the matcher isn't literal, but nothing here was removed yet — only add, don't subtract, until a live run is checked against the smaller list. UPDATE Oct 2 (.troubleshoot): 12 of 15 sampled on-profile titles — including roles already sent to her (Product Marketing Manager, Strategic Partnerships Manager, Ecosystem Marketing Lead, Partnership Success Manager, ABM Manager) — were dropped at title-match because the list lacked product/partnerships/ecosystem/ABM/customer/lifecycle/demand-gen/channel clusters. Added 13 patterns, additive only; validate on a live run.",
+  "titleExclusions": [
+    "intern",
+    "internship",
+    "co-op",
+    "contractor",
+    "temporary",
+    "principal",
+    "director",
+    "vp",
+    "president",
+    "head of",
+    "chief"
+  ],
   "_titleExclusions": "Caps the search at Senior/current level, per Irtiza's review of the first real digest: 'principal'/'director'/'vp'/'president'/'head of'/'chief' reject a step-above-current-level title (this substring-catches 'SVP'/'EVP'/'AVP' too via 'vp', and 'vice president' via 'president'). This is what removed the two Principal-level GitLab/Snowflake roles from that digest ('Principal Program Manager, Go-To-Market', 'Principal Business Operations Manager, Ops & AI Tooling'). 'Senior' is deliberately NOT excluded — that's her current level.",
-
   "salaryFloor": 120000,
   "_salaryFloor": "Set to $120,000. A posting that states no salary is NEVER rejected by this — it passes, flagged as unknown, and the scorer is told.",
   "salaryCurrency": "USD",
-
   "remoteOnly": true,
-  "metros": ["Houston", "Dallas", "New York"],
+  "metros": [
+    "Houston",
+    "Dallas",
+    "New York"
+  ],
   "_metros": "Per Shivani's direct feedback: onsite/hybrid roles in these three metros are now admitted too, on top of remote roles everywhere (remoteOnly stays true — metros only ADDS to what passes, it doesn't narrow the remote gate).",
-
-  "locationPriority": ["Houston", "Remote", "Dallas", "New York"],
+  "locationPriority": [
+    "Houston",
+    "Remote",
+    "Dallas",
+    "New York"
+  ],
   "locationPriorityStep": 2,
   "_locationPriority": "Her stated order of preference: Houston, Remote, Dallas, New York. Purely a display-order nudge (see rank.ts) — never excludes a role, never changes its score. A role matching an earlier entry ranks above one matching a later entry, at 2 points per tier step; a real score difference of 3+ points still wins, same balance as unstatedSalaryRankPenalty.",
-
   "usRemoteOnly": true,
   "_usRemoteOnly": "Set per Irtiza's follow-up: US-remote, not remote-anywhere. Rejects a posting that names a specific non-US country/region with no US option (e.g. 'Remote - India', 'Remote - Netherlands'). A bare 'Remote' with no country stated still passes — never rejected on a guess, same rule as the salary floor.",
-
   "experienceYearsFloor": 3,
   "experienceYearsCeiling": 7,
-  "_experienceYears": "Per Shivani's direct feedback: her resume shows 5 years since graduating, and she wants roles asking for 3-7 years (widened from 3-6 on Toozy's 2026-10-04 call: '3-7'). Hard boundaries: a posting is rejected when any stated figure exceeds the ceiling ('5-8', '6-8', '3-8' all die; open-ended '7+' dies) or its max sits below the floor. '5-7' and '3-7' survive. A posting stating no years requirement at all is never rejected by it — same 'don\u2019t guess' rule as the salary floor.",
-
+  "_experienceYears": "Per Shivani's direct feedback: her resume shows 5 years since graduating, and she wants roles asking for 3-7 years (widened from 3-6 on Toozy's 2026-10-04 call: '3-7'). Hard boundaries: a posting is rejected when any stated figure exceeds the ceiling ('5-8', '6-8', '3-8' all die; open-ended '7+' dies) or its max sits below the floor. '5-7' and '3-7' survive. A posting stating no years requirement at all is never rejected by it — same 'don’t guess' rule as the salary floor.",
   "maxRequiredYearsExperience": 5,
   "_maxRequiredYearsExperience": "Hard cap on a posting's stated MINIMUM years of experience: a posting whose minimum is greater than 5 is dropped (so '5+ years' and '3-5 years' are kept; '6+ years', 'minimum 6 years' and '6-8 years' are dropped). A posting that states no years is never dropped. Runs alongside the 3-6 band above.",
-
   "maxPostingAgeDays": 3,
   "_maxPostingAgeDays": "HARD recency filter, now 3 days (was 30): a posting whose stated post date is MORE than 3 days before the run is excluded; exactly 3.0 days is kept; an unknown post date is never excluded. History of the old 30-day value: Bumped 14 -> 21 -> 30. The 21 step (Sep 14) was to recover postings discovered late by scrapers (Vanta batch discovered Sep 14 but posted Aug 24-28). The second bump, same day, came from measuring the word-order title-matching fix below: of the title-good roles it rescued, 13 were still being lost to this window alone, clustered at 26-33 days old — i.e. real, on-profile roles a scraper just hadn't surfaced fast enough. A posting with no stated post date is never rejected by this — same 'don't guess' rule as everywhere else.",
-
   "lowApplicantThreshold": 200,
   "lowApplicantRankBonus": 3,
   "_lowApplicantThreshold": "Soft preference, never a filter: where a source states an applicant count under 200, that role gets +3 display-order rank. Unknown counts get no boost and no penalty. 0 bonus disables.",
-
   "industryExclusions": [],
   "companyExclusions": [],
-
   "scoreCutoff": 65,
   "unstatedSalaryRankPenalty": 3,
   "_unstatedSalaryRankPenalty": "Per Irtiza: de-prioritize roles with no stated salary, don't exclude them. Subtracted from a role's DISPLAY-ORDER rank only — never from the score shown, and never from whether it clears scoreCutoff. Weakened from an initial 8 to 3 after a live run flipped Snowflake's GTM & Enablement PM (82, unstated) below Notion's Partner Marketing Manager (78, $235k-260k stated) — a 4-point real quality gap shouldn't lose to a salary-transparency nudge. At 3, a genuine gap of 3+ points still wins on merit; only a near-tie (within ~1-2 points) now favors the pay-transparent role. 0 disables this entirely.",
   "digestLimit": 12,
-
   "postingTokenBudget": 600,
   "scoringBatchSize": 15,
   "scoringModel": "claude-haiku-4-5",

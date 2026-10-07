@@ -342,15 +342,24 @@ export function estimateTokens(text: string): number {
 }
 
 /**
- * Trims a posting to a token budget, keeping the front (title, level,
- * responsibilities, requirements all appear early) and cutting the tail.
+ * Trims a posting to a token budget. The front carries title, level, and
+ * responsibilities — but the Requirements/Qualifications sections the scorer
+ * needs most often live at the tail and used to get cut. So over-budget
+ * text keeps the head AND the last 500 chars, each half marked `[truncated]`
+ * so the scorer knows it is reading an excerpt. Total chars never exceed
+ * the budget, so scorer cost is unchanged.
  */
 export function truncateToBudget(text: string, tokenBudget: number): string {
   const maxChars = tokenBudget * 4;
   if (text.length <= maxChars) return text;
-  const cut = text.slice(0, maxChars);
-  const lastBreak = cut.lastIndexOf("\n");
-  return (lastBreak > maxChars * 0.6 ? cut.slice(0, lastBreak) : cut).trimEnd() + "\n[truncated]";
+  const TAIL_CHARS = 500;
+  const HEAD_MARKER = "\n[truncated]\n";
+  const TAIL_MARKER = "\n[truncated]";
+  const headChars = maxChars - TAIL_CHARS - HEAD_MARKER.length - TAIL_MARKER.length;
+  const head = text.slice(0, Math.max(headChars, 0));
+  const lastBreak = head.lastIndexOf("\n");
+  const headCut = (lastBreak > headChars * 0.6 ? head.slice(0, lastBreak) : head).trimEnd();
+  return `${headCut}${HEAD_MARKER}${text.slice(-TAIL_CHARS)}${TAIL_MARKER}`;
 }
 
 /** Only a finite, non-negative whole number counts as a stated applicant count; anything else is unknown. */
@@ -396,5 +405,6 @@ export function toJobRecord(raw: RawPosting, options: NormalizeOptions): JobReco
     confidence: null,
     rationale: null,
     gaps: [],
+    scoreDimensions: null,
   };
 }

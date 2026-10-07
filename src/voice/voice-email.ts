@@ -25,12 +25,11 @@ const FOOTER_MARKERS = [
   /^you are receiving this email because/i,
 ];
 
-function senderAddress(from: string): string {
-  const angle = from.match(/<([^>]+)>/);
-  return (angle ? angle[1] : from).trim();
-}
-
-/** Google puts a bare link to voice.google.com above the message; it is chrome, not message text. */
+/**
+ * Google's own chrome at the top of the body ("<https://voice.google.com>").
+ * It is not part of the message, and leaving it in makes every real email
+ * read as naming the "google" service, which poisons code matching.
+ */
 const CHROME_HEADER_LINE = /^<https?:\/\/[^\s<>]+>\s*$/i;
 
 function stripChromeHeader(body: string): string {
@@ -38,6 +37,11 @@ function stripChromeHeader(body: string): string {
   let start = 0;
   while (start < lines.length && (lines[start].trim() === "" || CHROME_HEADER_LINE.test(lines[start].trim()))) start += 1;
   return lines.slice(start).join("\n");
+}
+
+function senderAddress(from: string): string {
+  const angle = from.match(/<([^>]+)>/);
+  return (angle ? angle[1] : from).trim();
 }
 
 function stripFooter(body: string): string {

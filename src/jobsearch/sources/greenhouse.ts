@@ -1,5 +1,5 @@
 import type { RawPosting } from "../records";
-import { fetchJson, type Source } from "./source";
+import { fetchJson, type AtsSourceOptions, type Source } from "./source";
 
 /**
  * Greenhouse's public job board API. No key, no scraping, no robots.txt
@@ -49,11 +49,13 @@ export function parseGreenhouse(body: GreenhouseResponse, company: string, sourc
   }));
 }
 
-export function createGreenhouseSource(company: string, boardToken: string): Source {
+export function createGreenhouseSource(company: string, boardToken: string, options: AtsSourceOptions = {}): Source {
   const id = `greenhouse:${boardToken}`;
   return {
     id,
     company,
+    maxAgeDays: options.maxAgeDays,
+    priority: options.priority,
     async fetch() {
       const body = await fetchJson<GreenhouseResponse>(greenhouseUrl(boardToken));
       return parseGreenhouse(body, company, id, new Date().toISOString());

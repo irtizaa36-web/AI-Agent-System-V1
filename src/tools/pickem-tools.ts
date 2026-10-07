@@ -1,7 +1,7 @@
 import type { Tool } from "./tool";
 import type { SleeperReadClient } from "../integrations/sleeper/client";
 import { STAKING_RULES, computeBankroll, playsOn, type Conviction } from "../sleeper/pickem/bankroll";
-import { formatLineResearch, researchLine } from "../sleeper/pickem/research";
+import { formatLineResearch, formatNonNflLineResearch, parsePickemSport, researchLine, researchNonNflLine } from "../sleeper/pickem/research";
 import { buildSlip, parseSlipPicks } from "../sleeper/pickem/slip";
 import type { PickemStore } from "../sleeper/pickem/store";
 
@@ -24,14 +24,16 @@ export function createPickemResearchLineTool(client: SleeperReadClient): Tool {
   return {
     name: "pickem-research-line",
     description:
-      "Compares one Sleeper Picks line (copied from the app by the owner) with Sleeper's own weekly projection: lean MORE/LESS, edge %, and a grade (high, standard, or weak = skip). Read-only research.",
+      "Compares one Sleeper Picks line (copied from the app by the owner) with a projection: lean MORE/LESS, edge %, and a grade (high, standard, or weak = skip). NFL uses Sleeper's own weekly projection; MLB/CFB grade only against an owner-supplied projection, or return an ungraded thesis without one. Read-only research.",
     inputSchema: {
       type: "object",
       properties: {
-        player: { type: "string", description: "Full name as Sleeper shows it, or the Sleeper player id" },
-        stat: { type: "string", description: "e.g. \"receiving yards\" or a Sleeper key like rec_yd" },
+        player: { type: "string", description: "Full name as Sleeper shows it, or the Sleeper player id (NFL only; MLB/CFB take a plain name)" },
+        stat: { type: "string", description: "e.g. \"receiving yards\" or a key like rec_yd (NFL); \"strikeouts\", \"hits\" (MLB); \"passing yards\" (CFB)" },
         line: { type: "number" },
-        week: { type: "integer", minimum: 1, maximum: 18 },
+        week: { type: "integer", minimum: 1, maximum: 18, description: "NFL only" },
+        sport: { type: "string", enum: ["nfl", "mlb", "cfb"], description: "Defaults to nfl" },
+        projection: { type: "number", description: "Owner-supplied projection; required to grade MLB/CFB lines, rejected for NFL" },
       },
       required: ["player", "stat", "line"],
     },
@@ -40,6 +42,24 @@ export function createPickemResearchLineTool(client: SleeperReadClient): Tool {
       if (typeof v["player"] !== "string" || typeof v["stat"] !== "string" || typeof v["line"] !== "number") {
         throw new Error('pickem-research-line requires { "player": string, "stat": string, "line": number }');
       }
+      const sport = parsePickemSport(v["sport"] ?? "nfl");
+      if (sport === undefined) throw new Error('pickem-research-line "sport" must be one of nfl, mlb, cfb');
+      if (sport !== "nfl") {
+        const projection = v["projection"];
+        if (projection !== undefined && (typeof projection !== "number" || !(projection >= 0))) {
+          throw new Error('pickem-research-line "projection" must be a non-negative number');
+        }
+        return formatNonNflLineResearch(
+          researchNonNflLine({
+            sport,
+            player: v["player"],
+            stat: v["stat"],
+            line: v["line"],
+            ...(projection !== undefined ? { projection: projection as number } : {}),
+          }),
+        );
+      }
+      if (v["projection"] !== undefined) throw new Error('pickem-research-line "projection" is only for sport mlb|cfb');
       const research = await researchLine(client, {
         player: v["player"],
         stat: v["stat"],
