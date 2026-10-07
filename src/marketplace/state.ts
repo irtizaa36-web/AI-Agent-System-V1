@@ -59,7 +59,7 @@ export class JsonFileMarketplaceStorage implements MarketplaceStorage {
 function validateDocument(parsed: unknown): TrackerDocument {
   if (typeof parsed !== "object" || parsed === null) throw new Error("Marketplace state is not an object.");
   const doc = parsed as Record<string, unknown>;
-  if (doc["version"] !== 1) throw new Error(`Unsupported marketplace state version ${String(doc["version"])}.`);
+  if (doc["version"] !== 1 && doc["version"] !== 3) throw new Error(`Unsupported marketplace state version ${String(doc["version"])}.`);
   for (const key of ["listings", "leads", "campaigns", "constraints", "authority", "outbox", "bookings", "seenEvents", "activity"]) {
     if (!Array.isArray(doc[key])) throw new Error(`Marketplace state field "${key}" must be an array.`);
   }
@@ -76,6 +76,54 @@ function validateDocument(parsed: unknown): TrackerDocument {
     if (l["awaiting"] !== "them" && l["awaiting"] !== "us") l["awaiting"] = "them";
     if (typeof l["nudgeLevel"] !== "number") l["nudgeLevel"] = 0;
   }
+  // Migrate: v1 → v3 (Phase 0, Marketplace Manager v3 plan §1/§4/§6/§10).
+  // New stores: serviceRequests (services lane), contacts (cross-listing
+  // contact DB keyed by FB profile id), learning (pricing / approval /
+  // negotiation / trust analytics), inventory (running inventory across
+  // items, services, hunts). Old v1 files load with empty defaults; the
+  // migration never grants MORE send authority than v1 allowed — missing
+  // sendAuthority resolves to "per_message" (the most restrictive tier),
+  // and Lead.sendAuthority stays optional (absent ⇒ "per_message").
+  if (!Array.isArray(doc["serviceRequests"])) doc["serviceRequests"] = [];
+  // Migrate: Phase 3 services-lane fields (v3 plan §4) — trust protocol,
+  // nudge clock, booking-pending marker, rating, and the provider trust
+  // store (v3 plan §6.6). All additive; old request rows pick up defaults.
+  for (const r of doc["serviceRequests"] as Array<Record<string, unknown>>) {
+    if (!Array.isArray(r["screenedProviders"])) r["screenedProviders"] = [];
+    if (!Array.isArray(r["references"])) r["references"] = [];
+    if (typeof r["lastQuoteActivityAt"] !== "string") {
+      r["lastQuoteActivityAt"] = typeof r["createdAt"] === "string" ? r["createdAt"] : new Date().toISOString();
+    }
+  }
+  if (typeof doc["contacts"] !== "object" || doc["contacts"] === null) doc["contacts"] = {};
+  if (typeof doc["learning"] !== "object" || doc["learning"] === null) doc["learning"] = {};
+  const learning = doc["learning"] as Record<string, unknown>;
+  if (!Array.isArray(learning["pricingHistory"])) learning["pricingHistory"] = [];
+  if (typeof learning["approvalPatterns"] !== "object" || learning["approvalPatterns"] === null) learning["approvalPatterns"] = {};
+  if (typeof learning["negotiationOutcomes"] !== "object" || learning["negotiationOutcomes"] === null) learning["negotiationOutcomes"] = {};
+  if (typeof learning["contactTrustScores"] !== "object" || learning["contactTrustScores"] === null) learning["contactTrustScores"] = {};
+  // Migrate: Phase 2 kill-switch learning (v3 plan §3, §6.3).
+  if (!Array.isArray(learning["huntKills"])) learning["huntKills"] = [];
+  // Migrate: Phase 3 provider trust (v3 plan §6.6) — post-service ratings,
+  // keyed by normalized provider id. Empty when he has rated nothing yet.
+  if (typeof learning["providerTrust"] !== "object" || learning["providerTrust"] === null) learning["providerTrust"] = {};
+  // Migrate: Phase 4 learning loops (v3 plan §6) — approval-tap timestamps
+  // (loop #4) and relist sightings (loop #2). Both optional on the type so
+  // hand-built fixtures keep working.
+  if (!Array.isArray(learning["approvalTaps"])) learning["approvalTaps"] = [];
+  if (typeof learning["relistSightings"] !== "object" || learning["relistSightings"] === null) learning["relistSightings"] = {};
+  if (typeof doc["inventory"] !== "object" || doc["inventory"] === null) doc["inventory"] = {};
+  const inventory = doc["inventory"] as Record<string, unknown>;
+  if (!Array.isArray(inventory["items"])) inventory["items"] = [];
+  if (!Array.isArray(inventory["services"])) inventory["services"] = [];
+  if (!Array.isArray(inventory["hunts"])) inventory["hunts"] = [];
+  for (const m of doc["outbox"] as Array<Record<string, unknown>>) {
+    if (m["sendAuthority"] !== "auto" && m["sendAuthority"] !== "routine" && m["sendAuthority"] !== "per_message") {
+      m["sendAuthority"] = "per_message";
+    }
+  }
+  // Once migrated, the doc is v3-shaped — stamp it so the next save persists v3.
+  doc["version"] = 3;
   return parsed as TrackerDocument;
 }
 
@@ -93,7 +141,7 @@ function isoNow(): string {
  */
 export function seedDocument(now: string = isoNow()): TrackerDocument {
   return {
-    version: 1,
+    version: 3,
     listings: [
       {
         id: "chair",
@@ -332,6 +380,24 @@ export function seedDocument(now: string = isoNow()): TrackerDocument {
     activity: [
       { at: now, kind: "system", text: "Marketplace Agent v2 seeded: chair ($90) + BISSELL rental live; keyboard/mouse and tint hunts cancelled." },
     ],
+    // v3 stores seed empty; existing v2 seed data above is untouched.
+    serviceRequests: [],
+    contacts: {},
+    learning: {
+      pricingHistory: [],
+      approvalPatterns: {},
+      negotiationOutcomes: {},
+      contactTrustScores: {},
+      huntKills: [],
+      providerTrust: {},
+      approvalTaps: [],
+      relistSightings: {},
+    },
+    inventory: {
+      items: [],
+      services: [],
+      hunts: [],
+    },
     updatedAt: now,
   };
 }

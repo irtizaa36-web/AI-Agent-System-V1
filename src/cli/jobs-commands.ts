@@ -11,9 +11,7 @@ import { createJobsDashboardServer } from "../jobsearch/dashboard";
 import { createAlertMailSource } from "../jobsearch/sources/alert-mail";
 import { createInkboxClientFromEnv } from "../integrations/inkbox/real-client";
 import type { Source } from "../jobsearch/sources/source";
-import { createSmsClientFromEnv, SmsRecipientBlockedError } from "../jobsearch/sms-client";
-import { formatDigestSms } from "../jobsearch/digest-sms";
-import { formatDigestEmailBody, formatDigestEmailSubject } from "../jobsearch/digest-email";
+import { writeChatPackage } from "../jobsearch/chat-package";
 import { reconcileFiltered } from "../jobsearch/reconcile";
 import { scoreRecords } from "../jobsearch/score";
 import { sortByRank } from "../jobsearch/rank";
@@ -67,7 +65,7 @@ const USAGE = [
   "jobs subcommands (every one takes --profile <name>, or --all where noted):",
   "  run --profile <name>|--all   Fetch, dedupe, filter, score, and write today's digest",
   "  reconcile --profile <name>   Re-check already-filtered postings against today's rules (after a prefs/filter change) and score any that now pass",
-  "  check-feedback --profile <name>|--all   Read new direct replies from the candidate (email and, if DIGEST_IMESSAGE_TO is set, iMessage), answer questions, and auto-apply any preference changes (FEEDBACK_LOOP_ENABLED=true required)",
+  "  check-feedback --profile <name>|--all   Read new direct replies from the candidate (email and, if DIGEST_IMESSAGE_TO is set, iMessage) and auto-apply any preference changes (FEEDBACK_LOOP_ENABLED=true required). Never sends a reply — the standing NO-EMAILS rule.",
   "  enrich-contact --profile <name>|--all   Link DIGEST_IMESSAGE_TO's phone to the candidate's Inkbox contact record (found via DIGEST_EMAIL_TO) and tag it with this profile. Idempotent; safe to re-run.",
   "  digest --profile <name>      Print the most recent digest without running the pipeline",
   "  sources --profile <name>     List the configured sources and check each one's health",
@@ -280,9 +278,13 @@ async function runJobsRun(profile: string, root: string, deps: JobsCommandDeps):
   deps.stdout("");
   deps.stdout(`Digest written to ${join(digestDir, "latest.md")}`);
 
-  await sendDigestSmsIfConfigured(summary, deps);
-  await sendDigestImessageIfConfigured(summary, deps);
-  await sendDigestEmailIfConfigured(summary, deps);
+  // Terminal step, per the standing NO-EMAILS rule (2026-10-04): the run
+  // writes a chat package for the supervising agent to relay. It sends
+  // nothing — no email, no SMS, no iMessage — and builds no tailored
+  // resumes; those happen later, on the human's tap, outside this run.
+  await writeChatPackage(profile, root, summary, deps.stdout, {
+    filterVersion: `${prefs.experienceYearsFloor ?? "?"}-${prefs.experienceYearsCeiling ?? "?"}`,
+  });
 
   // Piggybacks on the same daily schedule as the pipeline itself, so the
   // feedback loop gets at least one pass a day with no separate scheduling
@@ -395,9 +397,10 @@ async function runJobsReconcile(profile: string, root: string, deps: JobsCommand
   deps.stdout("");
   deps.stdout(`${rescued.length} rescued, ${scored.length} scored, ${shortlisted.length} clear the cutoff.`);
 
-  await sendDigestSmsIfConfigured(summary, deps);
-  await sendDigestImessageIfConfigured(summary, deps);
-  await sendDigestEmailIfConfigured(summary, deps);
+  // Same terminal step as runJobsRun above: chat package, never a send.
+  await writeChatPackage(profile, root, summary, deps.stdout, {
+    filterVersion: `${prefs.experienceYearsFloor ?? "?"}-${prefs.experienceYearsCeiling ?? "?"}`,
+  });
 
   return 0;
 }
@@ -408,13 +411,10 @@ async function runJobsReconcile(profile: string, root: string, deps: JobsCommand
  * writing directly to us (see feedback.ts's looksLikeDirectMessage and
  * looksLikeDirectText — deliberately narrow, the same distinction
  * owner-forwarding.ts had to make once her full inbox started
- * auto-forwarding through this same mailbox), and for each one: answers any
- * question, applies any preference change she asked for, and replies on the
- * same channel telling her exactly what happened. Applied per Irtiza's
- * explicit Sep 16 call — no approval step — but "no approval step" and
- * "no guessing" are different rules: an ambiguous ask is reported back to
- * her as something to clarify, never silently guessed at (see feedback.ts's
- * own doc comment for why that distinction is load-bearing here).
+ * auto-forwarding through this same mailbox), and for each one: applies any
+ * preference change she asked for. The reply it would have sent is composed
+ * and logged for the supervising agent to relay — the standing NO-EMAILS
+ * rule (2026-10-04) means this loop never sends anything itself.
  *
  * Config changes are committed and pushed immediately (commitAndPush) —
  * necessary because the scheduled pipeline run never runs `git pull`
@@ -559,21 +559,11 @@ async function checkEmailFeedback(profile: string, root: string, deps: JobsComma
     }
 
     const replyBody = buildFeedbackReplyBody(classification, applied, rejected, latestRun);
-    let replied = false;
+    // Standing NO-EMAILS rule (2026-10-04): the reply is composed and logged
+    // for the supervising agent to relay — never sent.
+    const replied = false;
     if (replyBody.length > 0) {
-      try {
-        const draft = await inkboxClient.saveDraft({
-          to: [{ address: full.from.address }],
-          subject: full.subject.toLowerCase().startsWith("re:") ? full.subject : `Re: ${full.subject}`,
-          body: replyBody,
-          threadId: full.threadId,
-        });
-        await inkboxClient.send({ draftId: draft.id, revision: draft.revision });
-        replied = true;
-        deps.stdout(`Replied to ${full.from.address}.`);
-      } catch (error) {
-        deps.stderr(`Could not reply to ${full.from.address}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      deps.stdout(`Reply NOT sent to ${full.from.address} (standing NO-EMAILS rule) — logged for relay: ${replyBody.slice(0, 160)}`);
     }
 
     await feedbackLog.record({
@@ -645,15 +635,12 @@ async function checkImessageFeedback(profile: string, root: string, deps: JobsCo
     }
 
     const replyBody = buildFeedbackReplyBody(classification, applied, rejected, latestRun);
-    let replied = false;
+    // Standing rule (2026-10-04): no autonomous texts/iMessages to personal
+    // contacts. The reply is composed and logged for the supervising agent
+    // to relay — never sent.
+    const replied = false;
     if (replyBody.length > 0) {
-      try {
-        await imessageClient.send(candidatePhone, replyBody);
-        replied = true;
-        deps.stdout(`Texted a reply to ${candidatePhone}.`);
-      } catch (error) {
-        deps.stderr(`Could not text a reply to ${candidatePhone}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      deps.stdout(`Reply NOT texted to ${candidatePhone} (standing rule: no autonomous texts to personal contacts) — logged for relay: ${replyBody.slice(0, 160)}`);
     }
 
     await feedbackLog.record({
@@ -800,145 +787,60 @@ async function printCosts(root: string, deps: JobsCommandDeps): Promise<number> 
 }
 
 /**
- * Texts the digest, when — and only when — every one of these is explicitly
- * set: an SMS client can be built from the environment (INKBOX_API_KEY +
- * INKBOX_SMS_PHONE_NUMBER_ID), a destination number is configured
- * (DIGEST_SMS_TO), and DIGEST_SMS_ENABLED is exactly "true". Three separate
- * gates on purpose — having the credentials configured for testing must
- * never be the same thing as live automated sends being turned on for a
- * real person's phone.
- *
- * A failure here (most commonly: the destination hasn't been recorded as
- * opted in with Inkbox yet) is reported and never fails the run — the
- * digest itself was already written successfully before this runs.
+ * The single kill-switch for every outbound send in this pipeline. Returns
+ * false unconditionally: the standing NO-EMAILS rule (2026-10-04) bans all
+ * autonomous outbound messages — email, SMS, iMessage — to anyone, and the
+ * texting-lane rule bans autonomous texts/iMessages to personal contacts
+ * (the candidate included). Exported so the test suite can pin it closed:
+ * flipping this must be a deliberate, reviewed change, never an accident.
  */
-async function sendDigestSmsIfConfigured(summary: RunSummary, deps: JobsCommandDeps): Promise<void> {
-  if (process.env["DIGEST_SMS_ENABLED"] !== "true") return;
-
-  const to = process.env["DIGEST_SMS_TO"];
-  if (!to) {
-    deps.stderr("DIGEST_SMS_ENABLED is true but DIGEST_SMS_TO is not set — skipping the text.");
-    return;
-  }
-
-  const client = createSmsClientFromEnv();
-  if (!client) {
-    deps.stderr("DIGEST_SMS_ENABLED is true but INKBOX_API_KEY/INKBOX_SMS_PHONE_NUMBER_ID are not both set — skipping the text.");
-    return;
-  }
-
-  const maxRoles = Number.parseInt(process.env["DIGEST_SMS_MAX_ROLES"] ?? "5", 10);
-  const text = formatDigestSms(summary, Number.isFinite(maxRoles) && maxRoles > 0 ? maxRoles : 5);
-
-  try {
-    await client.send(to, text);
-    deps.stdout(`Digest texted to ${to}.`);
-  } catch (error) {
-    if (error instanceof SmsRecipientBlockedError) {
-      deps.stderr(
-        `Could not text the digest: ${error.message} Check that this number has been recorded as opted in through Inkbox before expecting this to work.`,
-      );
-    } else {
-      deps.stderr(`Could not text the digest: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
+export function outboundSendsPermitted(): boolean {
+  return false;
 }
 
 /**
- * Sends the digest as an iMessage, when — and only when — DIGEST_IMESSAGE_ENABLED
- * is exactly "true", DIGEST_IMESSAGE_TO is set, and INKBOX_API_KEY is present.
- * Three separate gates — same reasoning as sendDigestSmsIfConfigured above.
- * A send failure is reported and never fails the run.
+ * Digest SMS delivery — DISABLED by standing rule. The recipient
+ * (DIGEST_SMS_TO) is the candidate's own phone (ADR 0016: "per Shivani's
+ * own stated preference"), and autonomous texts to personal contacts are
+ * banned. The pure formatter (formatDigestSms) is untouched — it still
+ * describes the message that would have gone out. Exported so the test
+ * suite can assert that even DIGEST_SMS_ENABLED=true fires nothing.
  */
-async function sendDigestImessageIfConfigured(summary: RunSummary, deps: JobsCommandDeps): Promise<void> {
-  if (process.env["DIGEST_IMESSAGE_ENABLED"] !== "true") return;
-
-  const to = process.env["DIGEST_IMESSAGE_TO"];
-  if (!to) {
-    deps.stderr("DIGEST_IMESSAGE_ENABLED is true but DIGEST_IMESSAGE_TO is not set — skipping iMessage.");
-    return;
-  }
-
-  const apiKey = process.env["INKBOX_API_KEY"];
-  if (!apiKey) {
-    deps.stderr("DIGEST_IMESSAGE_ENABLED is true but INKBOX_API_KEY is not set — skipping iMessage.");
-    return;
-  }
-
-  const identityId = process.env["INKBOX_IDENTITY_ID"];
-  if (!identityId) {
-    deps.stderr("DIGEST_IMESSAGE_ENABLED is true but INKBOX_IDENTITY_ID is not set — skipping iMessage.");
-    return;
-  }
-
-  const maxRoles = Number.parseInt(process.env["DIGEST_IMESSAGE_MAX_ROLES"] ?? "5", 10);
-  const text = formatDigestSms(summary, Number.isFinite(maxRoles) && maxRoles > 0 ? maxRoles : 5);
-
-  try {
-    const url = `https://inkbox.ai/api/v1/imessage/messages?agent_identity_id=${encodeURIComponent(identityId)}`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "X-API-Key": apiKey, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ to, text }),
-    });
-    if (!response.ok) {
-      let detail: string;
-      try {
-        const err = (await response.json()) as { detail?: string };
-        detail = err.detail ?? response.statusText;
-      } catch {
-        detail = response.statusText;
-      }
-      deps.stderr(`Could not iMessage the digest: HTTP ${response.status} — ${detail}`);
-      return;
-    }
-    deps.stdout(`Digest iMessaged to ${to}.`);
-  } catch (error) {
-    deps.stderr(`Could not iMessage the digest: ${error instanceof Error ? error.message : String(error)}`);
-  }
+export async function sendDigestSmsIfConfigured(summary: RunSummary, deps: JobsCommandDeps): Promise<void> {
+  if (outboundSendsPermitted()) return;
+  deps.stdout(
+    `Digest SMS not sent to ${process.env["DIGEST_SMS_TO"] ?? "(unset)"} ` +
+      `(standing rule: no autonomous texts to personal contacts) — ${summary.shortlisted.length} role(s) are in the chat package instead.`,
+  );
 }
 
 /**
- * Emails the digest, when — and only when — DIGEST_EMAIL_ENABLED is exactly
- * "true", DIGEST_EMAIL_TO is set, and Inkbox is configured. Same three-gate
- * shape as the SMS/iMessage senders above, and the same non-fatal failure
- * handling — a send failure is reported, never fails the run.
- *
- * Goes through InkboxClient's draft-then-send flow (saveDraft, then send by
- * the draft's own id+revision) rather than a bespoke endpoint, because
- * that's the one path in this codebase that actually delivers mail — see
- * client.ts: `send` is explicitly "Consequential: actually delivers the
- * draft." A digest to Shivani about her own job search is informational,
- * not a job application or anything the CLAUDE.md stage-and-stop rule is
- * about, so — same as the SMS/iMessage sends already did before this —
- * there is no separate human approval step between saveDraft and send here.
+ * Digest iMessage delivery — DISABLED by standing rule. DIGEST_IMESSAGE_TO
+ * is the candidate's own phone ("her phone identity"), and autonomous
+ * iMessages to personal contacts are banned. Exported so the test suite can
+ * assert that even DIGEST_IMESSAGE_ENABLED=true fires nothing.
  */
-async function sendDigestEmailIfConfigured(summary: RunSummary, deps: JobsCommandDeps): Promise<void> {
-  if (process.env["DIGEST_EMAIL_ENABLED"] !== "true") return;
+export async function sendDigestImessageIfConfigured(summary: RunSummary, deps: JobsCommandDeps): Promise<void> {
+  if (outboundSendsPermitted()) return;
+  deps.stdout(
+    `Digest iMessage not sent to ${process.env["DIGEST_IMESSAGE_TO"] ?? "(unset)"} ` +
+      `(standing rule: no autonomous texts to personal contacts) — ${summary.shortlisted.length} role(s) are in the chat package instead.`,
+  );
+}
 
-  const to = process.env["DIGEST_EMAIL_TO"];
-  if (!to) {
-    deps.stderr("DIGEST_EMAIL_ENABLED is true but DIGEST_EMAIL_TO is not set — skipping the email.");
-    return;
-  }
-
-  const client = createInkboxClientFromEnv();
-  if (!client) {
-    deps.stderr("DIGEST_EMAIL_ENABLED is true but Inkbox is not configured (INKBOX_API_KEY/INKBOX_MAILBOX_ADDRESS) — skipping the email.");
-    return;
-  }
-
-  try {
-    const draft = await client.saveDraft({
-      to: [{ address: to }],
-      subject: formatDigestEmailSubject(summary),
-      body: formatDigestEmailBody(summary),
-    });
-    await client.send({ draftId: draft.id, revision: draft.revision });
-    deps.stdout(`Digest emailed to ${to}.`);
-  } catch (error) {
-    deps.stderr(`Could not email the digest: ${error instanceof Error ? error.message : String(error)}`);
-  }
+/**
+ * Digest email delivery — DISABLED by standing rule. NO outbound emails
+ * from anyone, ever — full stop. The pure formatters
+ * (formatDigestEmailSubject/Body) live on: the chat package reuses them for
+ * shortlist.txt. Exported so the test suite can assert that even
+ * DIGEST_EMAIL_ENABLED=true fires nothing.
+ */
+export async function sendDigestEmailIfConfigured(summary: RunSummary, deps: JobsCommandDeps): Promise<void> {
+  if (outboundSendsPermitted()) return;
+  deps.stdout(
+    `Digest email not sent to ${process.env["DIGEST_EMAIL_TO"] ?? "(unset)"} ` +
+      `(standing NO-EMAILS rule) — ${summary.shortlisted.length} role(s) are in the chat package instead.`,
+  );
 }
 
 /** Serves the review queue. Read-only: no endpoint here can act on the outside world. */

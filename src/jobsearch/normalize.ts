@@ -202,42 +202,67 @@ export interface ParsedExperience {
 
 const NO_EXPERIENCE: ParsedExperience = { min: null, max: null };
 
+// Boards abbreviate freely: "5 yrs", "3+ yrs experience". One unit pattern for all four matchers below.
+const YEARS_UNIT = String.raw`(?:years?|yrs)`;
+
 /**
  * Pulls a stated years-of-experience requirement out of posting text.
  * Returns nulls when the posting states nothing — the same discipline as
  * `parseSalary`: absence of a stated requirement is not itself a signal, and
  * the filter that uses this must never reject on a guess.
  *
- * Tries patterns in order of how much they actually say: an explicit range
- * ("3-6 years") first, then an open floor ("5+ years", "minimum of 5
- * years"), then a bare figure ("5 years of experience"), which is read as a
- * floor with no stated ceiling — the same convention "5+" uses, since a
- * posting rarely means "exactly 5 and not one year more."
+ * Collects EVERY figure the text states and returns their union (lowest
+ * min, highest stated max). A posting phrases one requirement several ways
+ * ("1-2 years in a startup environment ... 5-7 years of marketing
+ * experience") and the first phrasing is often the junior aside, not the
+ * real bar — first-match-wins silently dropped on-band roles on the aside
+ * (2026-10-02). The union keeps the downstream overlap check honest:
+ * "don't guess" cuts both ways.
+ *
+ * An explicit range ("3-6 years") contributes both ends; an open floor
+ * ("5+ years", "minimum of 5 years") and a bare figure ("5 years of
+ * experience", read as a floor with no stated ceiling — a posting rarely
+ * means "exactly 5 and not one year more") contribute a floor only. Up to
+ * two qualifier words may sit between "of" and "experience" ("10 years of
+ * marketing experience" is a stated requirement too).
  */
 export function parseExperienceYears(text: string): ParsedExperience {
-  const range = /(\d{1,2})\s*(?:-|–|—|to)\s*(\d{1,2})\+?\s*years?/i.exec(text);
-  if (range) {
-    const min = Number.parseInt(range[1] as string, 10);
-    const max = Number.parseInt(range[2] as string, 10);
-    if (min <= max) return { min, max };
+  const mins: number[] = [];
+  const maxes: number[] = [];
+
+  const range = new RegExp(String.raw`(\d{1,2})\s*(?:-|–|—|to)\s*(\d{1,2})\+?\s*` + YEARS_UNIT, "gi");
+  for (const match of text.matchAll(range)) {
+    const min = Number.parseInt(match[1] as string, 10);
+    const max = Number.parseInt(match[2] as string, 10);
+    if (min <= max) {
+      mins.push(min);
+      maxes.push(max);
+    }
   }
 
-  const floorPhrase = /(?:minimum(?:\s+of)?|at least|min\.?)\s*(\d{1,2})\+?\s*years?/i.exec(text);
-  if (floorPhrase) {
-    return { min: Number.parseInt(floorPhrase[1] as string, 10), max: null };
+  const floorPhrase = new RegExp(
+    String.raw`(?:minimum(?:\s+of)?|at least|min\.?)\s*(\d{1,2})\+?\s*` + YEARS_UNIT,
+    "gi"
+  );
+  for (const match of text.matchAll(floorPhrase)) {
+    mins.push(Number.parseInt(match[1] as string, 10));
   }
 
-  const plus = /(\d{1,2})\+\s*years?/.exec(text);
-  if (plus) {
-    return { min: Number.parseInt(plus[1] as string, 10), max: null };
+  const plus = new RegExp(String.raw`(\d{1,2})\+\s*` + YEARS_UNIT, "gi");
+  for (const match of text.matchAll(plus)) {
+    mins.push(Number.parseInt(match[1] as string, 10));
   }
 
-  const bare = /(\d{1,2})\s*years?\s*(?:of\s+)?(?:relevant\s+|professional\s+)?experience/i.exec(text);
-  if (bare) {
-    return { min: Number.parseInt(bare[1] as string, 10), max: null };
+  const bare = new RegExp(
+    String.raw`(\d{1,2})\s*` + YEARS_UNIT + String.raw`(?:\s+of)?(?:\s+\w+(?:\s+\w+)?)?\s+experience`,
+    "gi"
+  );
+  for (const match of text.matchAll(bare)) {
+    mins.push(Number.parseInt(match[1] as string, 10));
   }
 
-  return NO_EXPERIENCE;
+  if (mins.length === 0) return NO_EXPERIENCE;
+  return { min: Math.min(...mins), max: maxes.length > 0 ? Math.max(...maxes) : null };
 }
 
 /** Lowercase, punctuation-free, suffix-free company name — the half of the dedupe key that varies most between sources. */

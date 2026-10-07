@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Listing, ListingKind, TrackerDocument } from "../types";
+import type { Listing, ListingKind, PriceReferenceCard, TrackerDocument } from "../types";
 import { ACTIONS, assertAutonomous, sellingScope } from "../policy";
 
 /**
@@ -22,6 +22,8 @@ export interface CreateListingInput {
   readonly fbListingId?: string;
   readonly holdTimeoutHours?: number;
   readonly terms?: Listing["terms"];
+  /** v3 Phase 4 (plan §9): the 25-mile price reference card captured at intake. */
+  readonly priceCard?: PriceReferenceCard;
 }
 
 export function createListing(doc: TrackerDocument, input: CreateListingInput, nowIso: string): { doc: TrackerDocument; listing: Listing } {
@@ -41,6 +43,7 @@ export function createListing(doc: TrackerDocument, input: CreateListingInput, n
     monitoring: true,
     holdTimeoutHours: input.holdTimeoutHours ?? 24,
     terms: input.terms,
+    priceCard: input.priceCard,
     createdAt: nowIso,
     updatedAt: nowIso,
   };

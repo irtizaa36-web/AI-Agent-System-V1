@@ -11,9 +11,27 @@ npm run cli -- sleeper leagues <your_username>
 npm run cli -- sleeper preview <your_username>                  # every league, this week
 npm run cli -- sleeper waivers <your_username> --league <league_id>
 npm run cli -- sleeper pickem research --player "<name or id>" --stat "receiving yards" --line 64.5
+# MLB / college football (Sleeper's API is NFL-only, so these grade against a
+# projection you supply, or come back as an ungraded thesis without one):
+npm run cli -- sleeper pickem research --sport mlb --player "Gerrit Cole" --stat "strikeouts" --line 6.5 --projection 8.1
+npm run cli -- sleeper pickem research --sport cfb --player "Arch Manning" --stat "passing yards" --line 275.5
 ```
 
 The first run downloads Sleeper's player list (about 15MB) into `.orchestrator/sleeper/players-nfl.json` and reuses it for 24 hours. If a name matches more than one player, use the Sleeper player id the error lists.
+
+## MLB/CFB research caveats (ADR 0023)
+
+- Sleeper exposes no MLB or CFB projections — every endpoint the NFL path uses
+  is NFL-only. There is no independent projection to grade against.
+- With `--projection <n>`, the line is graded with the same thresholds as NFL
+  (≥20% edge = high, ≥10% = standard, closer = weak/skip). The projection is
+  yours (from the app, another source, or your own number) — the line setter
+  may see the same number, so treat it as research, not a guaranteed edge.
+- Without `--projection`, you get an ungraded news/form thesis: no lean, no
+  grade. It can never earn a conviction grade on a slip — that's structural,
+  not a suggestion.
+- `--week` is NFL-only; `--sport` defaults to `nfl`, so existing NFL usage is
+  unchanged.
 
 ## League writes (lineup, IR, taxi, add/drop, waivers, trades)
 

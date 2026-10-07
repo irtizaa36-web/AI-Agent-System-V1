@@ -5,7 +5,7 @@ import { parseSleeperWriteAction } from "../integrations/sleeper/write-actions";
 import { NOT_CONFIGURED, formatPreview, runSleeperWrite } from "../integrations/sleeper/write-gate";
 import { formatMatchupPreview, formatWaiverReport, matchupPreview, resolveAccount, waiverRecommendations } from "../sleeper/monitoring";
 import { computeBankroll } from "../sleeper/pickem/bankroll";
-import { formatLineResearch, researchLine } from "../sleeper/pickem/research";
+import { formatLineResearch, formatNonNflLineResearch, parsePickemSport, researchLine, researchNonNflLine } from "../sleeper/pickem/research";
 import { buildSlip, parseSlipPicks } from "../sleeper/pickem/slip";
 import { logManualEntry, settleEntry } from "../sleeper/pickem/store";
 import { pickemToday } from "../tools/pickem-tools";
@@ -24,7 +24,7 @@ const USAGE = [
   "  orchestrator sleeper preview <username> [--league <id>] [--week N]      Matchup preview with injury/bye alerts (all leagues if no --league)",
   "  orchestrator sleeper waivers <username> --league <id> [--week N] [--limit N]",
   "  orchestrator sleeper write --action <action.json> [--confirm]           Dry run by default; --confirm sends it",
-  '  orchestrator sleeper pickem research --player "<name|id>" --stat <stat> --line <n> [--week N]',
+  '  orchestrator sleeper pickem research --player "<name|id>" --stat <stat> --line <n> [--week N] [--sport nfl|mlb|cfb] [--projection <n>]',
   "  orchestrator sleeper pickem slip --picks <picks.json> --conviction standard|high [--stake n]",
   "  orchestrator sleeper pickem log <slipId> --multiplier <x> [--date YYYY-MM-DD]   After YOU placed it in the app",
   "  orchestrator sleeper pickem settle <entryId> --result won|lost|void [--payout n]",
@@ -68,15 +68,44 @@ async function runPickem(args: readonly string[], deps: CliDeps): Promise<number
   }
 
   if (sub === "research") {
-    const { values } = parseArgs({ args: [...rest], options: { player: { type: "string" }, stat: { type: "string" }, line: { type: "string" }, week: { type: "string" } } });
+    const { values } = parseArgs({
+      args: [...rest],
+      options: {
+        player: { type: "string" },
+        stat: { type: "string" },
+        line: { type: "string" },
+        week: { type: "string" },
+        sport: { type: "string" },
+        projection: { type: "string" },
+      },
+    });
     const line = Number(values.line);
     const week = weekOption(values.week);
-    if (!values.player || !values.stat || !(line > 0) || week === "invalid") {
-      deps.stderr('Usage: orchestrator sleeper pickem research --player "<name|id>" --stat <stat> --line <n> [--week N]');
+    const sport = parsePickemSport(values.sport ?? "nfl");
+    const projection = values.projection === undefined ? undefined : Number(values.projection);
+    if (!values.player || !values.stat || !(line > 0) || week === "invalid" || sport === undefined || (projection !== undefined && !(projection >= 0))) {
+      deps.stderr('Usage: orchestrator sleeper pickem research --player "<name|id>" --stat <stat> --line <n> [--week N] [--sport nfl|mlb|cfb] [--projection <n>]');
       return 1;
     }
-    const research = await researchLine(sleeper.readClient, { player: values.player, stat: values.stat, line, ...(week !== undefined ? { week } : {}) });
-    deps.stdout(formatLineResearch(research));
+    if (sport === "nfl") {
+      if (projection !== undefined) {
+        deps.stderr("Note: --projection is only for --sport mlb|cfb; NFL research always uses Sleeper's own projection.");
+        return 1;
+      }      const research = await researchLine(sleeper.readClient, { player: values.player, stat: values.stat, line, ...(week !== undefined ? { week } : {}) });
+      deps.stdout(formatLineResearch(research));
+      return 0;
+    }
+    const research = researchNonNflLine({
+      sport,
+      player: values.player,
+      stat: values.stat,
+      line,
+      ...(projection !== undefined ? { projection } : {}),
+    });
+    if (week !== undefined) {
+      deps.stderr("Note: --week is NFL-only and is ignored for --sport mlb|cfb.");
+    }
+    deps.stdout(formatNonNflLineResearch(research));
     return 0;
   }
 

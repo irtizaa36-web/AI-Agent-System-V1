@@ -21,9 +21,22 @@
     "marketing operations manager",
     "partner marketing manager",
     "program manager, executive engagement",
-    "vendor manager"
+    "vendor manager",
+    "product marketing manager",
+    "partnerships manager",
+    "partner manager",
+    "strategic partnerships",
+    "ecosystem marketing",
+    "abm manager",
+    "account based marketing",
+    "customer marketing manager",
+    "lifecycle marketing manager",
+    "demand generation manager",
+    "channel marketing manager",
+    "alliances manager",
+    "partner success manager"
   ],
-  "_titles": "Merged from her resume (Marketing Program Manager, Vendor Manager) and her own ChatGPT-suggested title list. An earlier draft dropped the bare 'program manager' on the theory that it matched irrelevant Technical/Federal PM postings too — true, but re-checked against a live run and reversed: title matching runs BEFORE the location/salary filters, so an irrelevant onsite match costs nothing in tokens, it's rejected before any model call. Removing it had a real cost with no real saving: it silently dropped two genuinely good GitLab matches ('Senior Program Manager, Enterprise Technology & AI', 'Principal Program Manager, Go-To-Market') whose titles don't contain any of the more specific phrases below, because substring matching is literal and word order varies. Kept broad on purpose now. UPDATE Sep 14: 'word order varies' turned out to be a real bug, not just a reason to keep the list broad — filter.ts matched titles as a literal substring, so 'GTM Strategy & Operations Manager' never matched the configured 'strategy & operations manager' pattern at all. Fixed in titleMatchesTarget (normalize.ts) to match on word presence regardless of order; measured against the Sep 14 job store, that alone rescued 14 on-profile roles (Vanta, Snowflake, Stripe, Notion, Zapier, Docker...) that the old check silently dropped. This list can probably shrink now that the matcher isn't literal, but nothing here was removed yet — only add, don't subtract, until a live run is checked against the smaller list.",
+  "_titles": "Merged from her resume (Marketing Program Manager, Vendor Manager) and her own ChatGPT-suggested title list. An earlier draft dropped the bare 'program manager' on the theory that it matched irrelevant Technical/Federal PM postings too — true, but re-checked against a live run and reversed: title matching runs BEFORE the location/salary filters, so an irrelevant onsite match costs nothing in tokens, it's rejected before any model call. Removing it had a real cost with no real saving: it silently dropped two genuinely good GitLab matches ('Senior Program Manager, Enterprise Technology & AI', 'Principal Program Manager, Go-To-Market') whose titles don't contain any of the more specific phrases below, because substring matching is literal and word order varies. Kept broad on purpose now. UPDATE Sep 14: 'word order varies' turned out to be a real bug, not just a reason to keep the list broad — filter.ts matched titles as a literal substring, so 'GTM Strategy & Operations Manager' never matched the configured 'strategy & operations manager' pattern at all. Fixed in titleMatchesTarget (normalize.ts) to match on word presence regardless of order; measured against the Sep 14 job store, that alone rescued 14 on-profile roles (Vanta, Snowflake, Stripe, Notion, Zapier, Docker...) that the old check silently dropped. This list can probably shrink now that the matcher isn't literal, but nothing here was removed yet — only add, don't subtract, until a live run is checked against the smaller list. UPDATE Oct 2 (.troubleshoot): 12 of 15 sampled on-profile titles — including roles already sent to her (Product Marketing Manager, Strategic Partnerships Manager, Ecosystem Marketing Lead, Partnership Success Manager, ABM Manager) — were dropped at title-match because the list lacked product/partnerships/ecosystem/ABM/customer/lifecycle/demand-gen/channel clusters. Added 13 patterns, additive only; validate on a live run.",
 
   "titleExclusions": ["intern", "internship", "co-op", "contractor", "temporary", "principal", "director", "vp", "president", "head of", "chief"],
   "_titleExclusions": "Caps the search at Senior/current level, per Irtiza's review of the first real digest: 'principal'/'director'/'vp'/'president'/'head of'/'chief' reject a step-above-current-level title (this substring-catches 'SVP'/'EVP'/'AVP' too via 'vp', and 'vice president' via 'president'). This is what removed the two Principal-level GitLab/Snowflake roles from that digest ('Principal Program Manager, Go-To-Market', 'Principal Business Operations Manager, Ops & AI Tooling'). 'Senior' is deliberately NOT excluded — that's her current level.",
@@ -44,8 +57,8 @@
   "_usRemoteOnly": "Set per Irtiza's follow-up: US-remote, not remote-anywhere. Rejects a posting that names a specific non-US country/region with no US option (e.g. 'Remote - India', 'Remote - Netherlands'). A bare 'Remote' with no country stated still passes — never rejected on a guess, same rule as the salary floor.",
 
   "experienceYearsFloor": 3,
-  "experienceYearsCeiling": 6,
-  "_experienceYears": "Per Shivani's direct feedback: her resume shows 5 years since graduating, and she wants roles asking for 3-6 years — not a step up in required seniority, and not a step down into entry-level. This is an OVERLAP check against a posting's stated range, not an exact match (a posting asking for '3-8 years' still overlaps this band). A posting stating no years requirement at all is never rejected by it — same 'don't guess' rule as the salary floor.",
+  "experienceYearsCeiling": 7,
+  "_experienceYears": "Per Shivani's direct feedback: her resume shows 5 years since graduating, and she wants roles asking for 3-7 years (widened from 3-6 on Toozy's 2026-10-04 call: '3-7'). Hard boundaries: a posting is rejected when any stated figure exceeds the ceiling ('5-8', '6-8', '3-8' all die; open-ended '7+' dies) or its max sits below the floor. '5-7' and '3-7' survive. A posting stating no years requirement at all is never rejected by it — same 'don't guess' rule as the salary floor.",
 
   "maxPostingAgeDays": 30,
   "_maxPostingAgeDays": "Bumped 14 -> 21 -> 30. The 21 step (Sep 14) was to recover postings discovered late by scrapers (Vanta batch discovered Sep 14 but posted Aug 24-28). The second bump, same day, came from measuring the word-order title-matching fix below: of the title-good roles it rescued, 13 were still being lost to this window alone, clustered at 26-33 days old — i.e. real, on-profile roles a scraper just hadn't surfaced fast enough. A posting with no stated post date is never rejected by this — same 'don't guess' rule as everywhere else.",

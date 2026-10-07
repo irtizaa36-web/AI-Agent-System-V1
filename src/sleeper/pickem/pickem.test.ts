@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { STAKING_RULES, computeBankroll, decideStake, type LedgerEntry } from "./bankroll";
-import { assessLine, findPlayer, researchLine, resolveStatKey } from "./research";
+import { assessLine, findPlayer, formatNonNflLineResearch, parsePickemSport, researchLine, researchNonNflLine, resolveStatKey, resolveStatKeyForSport } from "./research";
 import { buildSlip, parseSlipPicks, type SlipPick } from "./slip";
 import { InMemoryPickemStore, JsonFilePickemStore, logManualEntry, settleEntry } from "./store";
 import { fixtureClient, PLAYERS } from "../test-fixtures";
@@ -69,6 +69,62 @@ test("line grading: ≥20% edge is high, ≥10% standard, closer is weak", () =>
   assert.throws(() => assessLine(10, 0), /positive/);
   assert.equal(resolveStatKey("Receiving Yards"), "rec_yd");
   assert.equal(resolveStatKey("rush_yd"), "rush_yd");
+});
+
+test("stat aliases resolve per sport", () => {
+  assert.equal(resolveStatKeyForSport("Receiving Yards", "nfl"), "rec_yd");
+  assert.equal(resolveStatKeyForSport("Strikeouts", "mlb"), "so");
+  assert.equal(resolveStatKeyForSport("Pitcher Strikeouts", "mlb"), "pitching_so");
+  assert.equal(resolveStatKeyForSport("Home Runs", "mlb"), "hr");
+  assert.equal(resolveStatKeyForSport("RBIs", "mlb"), "rbi");
+  assert.equal(resolveStatKeyForSport("Stolen Bases", "mlb"), "sb");
+  assert.equal(resolveStatKeyForSport("Total Bases", "mlb"), "tb");
+  assert.equal(resolveStatKeyForSport("Passing Yards", "cfb"), "pass_yd");
+  assert.equal(resolveStatKeyForSport("Rushing Yards", "cfb"), "rush_yd");
+  assert.equal(resolveStatKeyForSport("Receptions", "cfb"), "rec");
+  assert.equal(resolveStatKeyForSport("Touchdowns", "cfb"), "td");
+  assert.equal(resolveStatKeyForSport("slugging percentage", "mlb"), "slugging_percentage", "unknown stats fall back to snake_case");
+  assert.equal(resolveStatKey("Receiving Yards"), "rec_yd", "NFL alias resolution is unchanged");
+});
+
+test("parsePickemSport accepts nfl/mlb/cfb and rejects the rest", () => {
+  assert.equal(parsePickemSport("nfl"), "nfl");
+  assert.equal(parsePickemSport("MLB"), "mlb");
+  assert.equal(parsePickemSport(" cfb "), "cfb");
+  assert.equal(parsePickemSport("nhl"), undefined);
+  assert.equal(parsePickemSport(undefined), undefined);
+  assert.equal(parsePickemSport(42), undefined);
+});
+
+test("researchNonNflLine grades against an owner-supplied projection with NFL thresholds", () => {
+  const graded = researchNonNflLine({ sport: "mlb", player: "Ace Arm", stat: "strikeouts", line: 6.5, projection: 8.2 });
+  assert.equal(graded.statKey, "so");
+  assert.deepEqual(graded.assessment, assessLine(8.2, 6.5));
+  assert.equal(graded.assessment?.grade, "high");
+  assert.ok(graded.caveats.some((c) => /owner-supplied projection/.test(c)));
+
+  const weak = researchNonNflLine({ sport: "cfb", player: "Gunner Pass", stat: "passing yards", line: 250, projection: 262 });
+  assert.equal(weak.assessment?.grade, "weak");
+
+  const out = formatNonNflLineResearch(graded);
+  assert.match(out, /sport:mlb/);
+  assert.match(out, /player:Ace Arm/);
+  assert.match(out, /stat:so/);
+  assert.match(out, /lean:MORE/);
+  assert.match(out, /grade:high/);
+});
+
+test("researchNonNflLine without a projection is an ungraded thesis, never a grade", () => {
+  const thesis = researchNonNflLine({ sport: "mlb", player: "Ace Arm", stat: "hits", line: 1.5 });
+  assert.equal(thesis.assessment, undefined);
+  assert.ok(thesis.caveats.some((c) => /ungraded news\/form thesis/.test(c)));
+  assert.match(formatNonNflLineResearch(thesis), /grade:unknown \(no projection — ungraded thesis\)/);
+});
+
+test("researchNonNflLine validates its inputs", () => {
+  assert.throws(() => researchNonNflLine({ sport: "mlb", player: "  ", stat: "hits", line: 1.5 }), /non-empty player/);
+  assert.throws(() => researchNonNflLine({ sport: "mlb", player: "Ace", stat: "hits", line: 0 }), /positive/);
+  assert.throws(() => researchNonNflLine({ sport: "cfb", player: "Ace", stat: "hits", line: 1.5, projection: -1 }), /non-negative/);
 });
 
 test("player lookup by name is exact and refuses to guess between namesakes", () => {

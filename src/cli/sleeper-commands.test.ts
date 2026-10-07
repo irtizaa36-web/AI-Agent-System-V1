@@ -107,6 +107,28 @@ test("pick'em: research, slip, the owner logs his manual entry, then settles it"
     assert.equal(await runCli(["sleeper", "pickem", "research", "--player", "Wes Wideout", "--stat", "rec_yd", "--line", "64.5"], h.deps), 0);
     assert.match(h.stdout.join("\n"), /grade:high/);
 
+    h.stdout.length = 0;
+    assert.equal(
+      await runCli(["sleeper", "pickem", "research", "--sport", "mlb", "--player", "Ace Arm", "--stat", "strikeouts", "--line", "6.5", "--projection", "8.2"], h.deps),
+      0,
+    );
+    assert.match(h.stdout.join("\n"), /sport:mlb[\s\S]*grade:high/);
+
+    h.stdout.length = 0;
+    assert.equal(
+      await runCli(["sleeper", "pickem", "research", "--sport", "cfb", "--player", "Gunner Pass", "--stat", "passing yards", "--line", "250"], h.deps),
+      0,
+    );
+    assert.match(h.stdout.join("\n"), /sport:cfb[\s\S]*grade:unknown \(no projection — ungraded thesis\)/);
+
+    const badSport = harness();
+    assert.equal(await runCli(["sleeper", "pickem", "research", "--sport", "nhl", "--player", "A", "--stat", "hits", "--line", "1.5"], badSport.deps), 1);
+    assert.match(badSport.stderr.join("\n"), /Usage/);
+
+    const badProj = harness();
+    assert.equal(await runCli(["sleeper", "pickem", "research", "--player", "Wes Wideout", "--stat", "rec_yd", "--line", "64.5", "--projection", "80"], badProj.deps), 1);
+    assert.match(badProj.stderr.join("\n"), /only for --sport mlb\|cfb/);
+
     const picks = join(dir, "picks.json");
     await writeFile(
       picks,
